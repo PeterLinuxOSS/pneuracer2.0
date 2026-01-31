@@ -4,14 +4,9 @@
 #include <CRSFforArduino.hpp>
 #include <ESP32Servo.h>
 #include <ESP32PWM.h>
-
-// DÔLEŽITÉ: Musíš mať tento súbor v src/shared/SharedData.h
 #include "shared/SharedData.h" 
 
-// --- KONFIGURÁCIA PINOV PRE SLAVE UART ---
-// Uprav podľa tvojej schémy! (Napr. IO17/IO18)
-#define PIN_SLAVE_RX 18  
-#define PIN_SLAVE_TX 17 
+
 
 // --- OBJEKTY ---
 Servo steering;
@@ -57,7 +52,7 @@ void setup_NeoPixel() {
 void setup() {
     Serial.begin(921600); // USB Debug
     
-    Serial2.begin(921600, SERIAL_8N1, PIN_SLAVE_RX, PIN_SLAVE_TX);
+    Serial2.begin(921600, SERIAL_8N1, INTER_TX_S, INTER_RX_S);
 
     setup_ServoPWM();
     setup_NeoPixel();
