@@ -45,7 +45,8 @@ void setup_ServoPWM() {
 void setup_NeoPixel() {
     pixels.begin();
     pixels.clear();
-    pixels.setBrightness(50); // Šetríme oči aj prúd
+    pixels.setBrightness(50); 
+    pixels.fill(pixels.Color(255, 100, 0)); 
     pixels.show();
 }
 

@@ -5,7 +5,7 @@
 #include "pins.h"
 
 
-// --- OBJEKTY ---
+
 Servo airServo;
 Adafruit_NeoPixel StatusLed(1, STATUS_LED, NEO_GRB + NEO_KHZ800);
 
@@ -19,6 +19,15 @@ SemaphoreHandle_t dataMutex;
 // --- PROTOTYPY ---
 void TaskComms(void *pvParameters);
 void setFailsafe();
+
+
+void setup_NeoPixel() {
+    StatusLed.begin();
+    StatusLed.clear();
+    StatusLed.setBrightness(50); 
+    StatusLed.fill(StatusLed.Color(255, 100, 0)); 
+    StatusLed.show();
+}
 
 void setup() {
     Serial.begin(921600); // USB Debug
@@ -37,11 +46,7 @@ void setup() {
     airServo.setPeriodHertz(333);
     airServo.attach(SERVO_REG, 500, 2500);
 
-    // LED
-    StatusLed.begin();
-    StatusLed.setBrightness(50);
-    StatusLed.fill(StatusLed.Color(255, 100, 0)); // Oranžová (Boot)
-    StatusLed.show();
+    setup_NeoPixel();
 
     // Mutex
     dataMutex = xSemaphoreCreateMutex();
@@ -153,11 +158,11 @@ void TaskComms(void *pvParameters) {
     }
 }
 
-// Bezpečnostná funkcia
+// Fail Safe function
 void setFailsafe() {
-    digitalWrite(VALVE_A, LOW); // Zatvor ventily
+    digitalWrite(VALVE_A, LOW); 
     digitalWrite(VALVE_B, LOW);
-    StatusLed.fill(StatusLed.Color(255, 0, 0)); // Červená
+    StatusLed.fill(StatusLed.Color(255, 0, 0)); 
     StatusLed.show();
     
 }
