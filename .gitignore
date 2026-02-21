@@ -5,3 +5,4 @@
 .vscode/ipch
 .ini
 desktop.ini
+**/desktop.ini
