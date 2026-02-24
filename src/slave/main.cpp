@@ -4,49 +4,61 @@
 #include "shared/SharedData.h" // Tvoja zdieľaná štruktúra
 #include "pins.h"
 
-
-
 Servo airServo;
-Adafruit_NeoPixel StatusLed(1, STATUS_LED, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel StatusLed(NEOPIXEL_COUNT, STATUS_LED, NEO_GRB + NEO_KHZ800);
 
 // --- ZDIEĽANÉ DÁTA (Thread Safe) ---
 volatile ControlPacket currentData; // Dáta prijaté od Mastera
 volatile bool isConnectionActive = false;
-int hall_start = 0;
-int hall_end = 0;
 SemaphoreHandle_t dataMutex;
+
+
 
 // --- PROTOTYPY ---
 void TaskComms(void *pvParameters);
 void setFailsafe();
 
+// Simple valve switching state (no Hall sensors)
+int currentValveState = 0; // 0=both off, 1=VALVE_A, 2=VALVE_B
+unsigned long lastSwitchTime = 0;
+int hall_start = 0;
+int hall_end = 0;
+bool ledBlinkOn = false;
+unsigned long lastBlinkTime = 0;
+bool directionForward = true;
+bool valveA = LOW;
+bool valveB = LOW;
 
-void setup_NeoPixel() {
+void setup_NeoPixel()
+{
     StatusLed.begin();
     StatusLed.clear();
-    StatusLed.setBrightness(50); 
-    StatusLed.fill(StatusLed.Color(255, 100, 0)); 
+    StatusLed.setBrightness(50);
+    StatusLed.fill(StatusLed.Color(255, 100, 0));
     StatusLed.show();
 }
 
-void setup() {
+void setup()
+{
+    setup_NeoPixel();
     Serial.begin(921600); // USB Debug
-    
+
     // UART ku Masterovi
     Serial1.begin(921600, SERIAL_8N1, UART_RX, UART_TX);
 
     // Nastavenie pinov
     pinMode(VALVE_A, OUTPUT);
     pinMode(VALVE_B, OUTPUT);
+    digitalWrite(VALVE_A, LOW);
+    digitalWrite(VALVE_B, LOW);
     pinMode(HALL_START, INPUT); // Alebo INPUT_PULLUP ak treba
     pinMode(HALL_END, INPUT);
+    delay(1000); // Krátka pauza pro stabilizáciu
 
     // Servo setup
     ESP32PWM::allocateTimer(0);
     airServo.setPeriodHertz(333);
     airServo.attach(SERVO_REG, 500, 2500);
-
-    setup_NeoPixel();
 
     // Mutex
     dataMutex = xSemaphoreCreateMutex();
@@ -65,80 +77,135 @@ void setup() {
     Serial.println("SLAVE ESP32-S3 Ready");
 }
 
-void loop() {
+void loop()
+{
     // --- HLAVNÁ SLUČKA (CORE 1) - OVLÁDANIE ---
     // Toto beží rýchlo a stará sa o fyzické piny
-    
+
     ControlPacket localData;
     bool connectionOK;
-
-    // 1. Bezpečné načítanie dát z globálnej premennej
-    if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE) {
-        localData = *(const ControlPacket*)&currentData; // Kópia dát
+    
+    if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
+    {
+        localData = *(const ControlPacket *)&currentData;
         connectionOK = isConnectionActive;
         xSemaphoreGive(dataMutex);
     }
 
-    // 2. Logika ovládania
-    if (connectionOK) {
-        hall_start = analogRead(HALL_START);
-        hall_end = analogRead(HALL_END);
-        if (localData.throttle > 0) {
-            airServo.writeMicroseconds(localData.throttle);
-            if (hall_start < HALL_THRESHOLD) {
-                digitalWrite(VALVE_A, HIGH);
-                digitalWrite(VALVE_B, LOW);
+    if (connectionOK)
+    {
+        int val1 = analogRead(HALL_START);
+        int val2 = analogRead(HALL_END);
 
-            } else if (hall_end < HALL_THRESHOLD) {
+        if (localData.elrsActive)
+        {
+            StatusLed.fill(StatusLed.Color(0, 255, 0)); // Zelená - ELRS OK
+
+
+            if (localData.throttle > 180)
+            {
+                int h_start = analogRead(HALL_START);
+                int h_end = analogRead(HALL_END);
+
+                if (h_start > HALL_THRESHOLD && h_end > HALL_THRESHOLD)
+                {
+                    Serial.printf("---- H_Start: %4d | H_End: %4d | Dir: %s\n",
+                                  h_start, h_end, directionForward ? "FORWARD" : "REVERSE");
+                }else{
+                    if (h_start < HALL_THRESHOLD)
+                    {
+                        directionForward = true; // Narazil na štart -> choď vpred
+                    }
+                    else if (h_end < HALL_THRESHOLD)
+                    {
+                        directionForward = false; // Narazil na koniec -> choď vzad
+                    }
+                    Serial.printf("H_Start: %4d | H_End: %4d | Dir: %s\n",
+                              h_start, h_end, directionForward ? "FORWARD" : "REVERSE");
+                }
+                // --- NASTAVENIE VENTILOV ---
+                if (directionForward)
+                {
+                    digitalWrite(VALVE_A, HIGH);
+                    digitalWrite(VALVE_B, LOW);
+                }
+                else
+                {
+                    digitalWrite(VALVE_A, LOW);
+                    digitalWrite(VALVE_B, HIGH);
+                }
+
+                
+            }
+            else
+            {
+                // Throttle je nízky
                 digitalWrite(VALVE_A, LOW);
-                digitalWrite(VALVE_B, HIGH);
-            } 
-        } else{
-            digitalWrite(VALVE_A, LOW);
-            digitalWrite(VALVE_B, LOW);
-            airServo.write(0); // Bezpečná poloha
+                digitalWrite(VALVE_B, LOW);
+                airServo.write(0);
+            }
         }
-        
-        
-        StatusLed.fill(StatusLed.Color(0, 255, 0));
-    } else {
-        // FAILSAFE REŽIM (Master neodpovedá)
+        else
+        {
+            setFailsafe();
+            unsigned long nowBlink = millis();
+            if (nowBlink - lastBlinkTime >= 1000UL)
+            {
+                ledBlinkOn = !ledBlinkOn;
+                lastBlinkTime = nowBlink;
+            }
+            if (ledBlinkOn)
+            {
+                StatusLed.fill(StatusLed.Color(0, 255, 255));
+            }
+            else
+            {
+                StatusLed.fill(StatusLed.Color(0, 0, 0));
+            }
+        }
+    }
+    else
+    {
+        // FAILSAFE REŽIM 
         setFailsafe();
         StatusLed.fill(StatusLed.Color(255, 0, 0)); // Červená
     }
-    
+
     StatusLed.show();
-    
+
     // Tu môžeš čítať Hall senzory a posielať späť Masterovi (ak to bude treba)
     // bool pistonStart = digitalRead(HALL_START);
-    
+
     delay(10); // Stačí 100Hz refresh rate pre ventily
 }
 
 // --- TASK: KOMUNIKÁCIA (CORE 0) ---
-void TaskComms(void *pvParameters) {
+void TaskComms(void *pvParameters)
+{
     ControlPacket tempPacket;
     unsigned long lastPacketTime = 0;
 
-    for (;;) {
-        // Čítame UART
-        if (Serial1.available() >= sizeof(ControlPacket)) {
-            
-            // Kontrola hlavičky (Sync byte)
-            if (Serial1.peek() != (PACKET_HEADER & 0xFF)) {
-                Serial1.read(); // Zahodíme smeti
+    for (;;)
+    {
+        if (Serial1.available() >= sizeof(ControlPacket))
+        {
+
+            if (Serial1.peek() != (PACKET_HEADER & 0xFF))
+            {
+                Serial1.read(); 
                 continue;
             }
 
-            Serial1.readBytes((char*)&tempPacket, sizeof(ControlPacket));
+            Serial1.readBytes((char *)&tempPacket, sizeof(ControlPacket));
 
             // Kontrola integrity (Checksum)
-            if (tempPacket.header == PACKET_HEADER && 
-                tempPacket.checksum == calculateChecksum(&tempPacket)) {
-                
-                // Zápis do zdieľanej premennej
-                if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE) {
-                    memcpy((void*)&currentData, &tempPacket, sizeof(ControlPacket));
+            if (tempPacket.header == PACKET_HEADER &&
+                tempPacket.checksum == calculateChecksum(&tempPacket))
+            {
+
+                if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
+                {
+                    memcpy((void *)&currentData, &tempPacket, sizeof(ControlPacket));
                     isConnectionActive = true;
                     xSemaphoreGive(dataMutex);
                 }
@@ -146,23 +213,24 @@ void TaskComms(void *pvParameters) {
             }
         }
 
-        // WATCHDOG / FAILSAFE TIMER
-        if (millis() - lastPacketTime > 500) { // 500ms bez signálu
-            if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE) {
-                isConnectionActive = false; // Trigger failsafe v hlavnom loope
+        if (millis() - lastPacketTime > 500)
+        { // 500ms bez signálu
+            if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
+            {
+                isConnectionActive = false; 
                 xSemaphoreGive(dataMutex);
             }
         }
 
-        vTaskDelay(5); 
+        vTaskDelay(5);
     }
 }
 
-// Fail Safe function
-void setFailsafe() {
-    digitalWrite(VALVE_A, LOW); 
+
+void setFailsafe()
+{
+    digitalWrite(VALVE_A, LOW);
     digitalWrite(VALVE_B, LOW);
-    StatusLed.fill(StatusLed.Color(255, 0, 0)); 
+    StatusLed.fill(StatusLed.Color(255, 0, 255)); 
     StatusLed.show();
-    
 }

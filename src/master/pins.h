@@ -19,7 +19,7 @@
 // Sensors & Inputs
 #define VBAT_REF             15  // IO15
 #define IMU_INT              8   // IO8
-#define VAL1_A               36  // IO36 
+#define VAL1_A               14  // IO36 
 #define VAL1_B               35  // IO35 
 #define BUTTON               7  // IO7
 
@@ -29,5 +29,5 @@
 
 //NeoPixel
 #define MASTER_STATUS_LED    3   // IO3
-#define NEOPIXEL_COUNT       1   // 
+#define NEOPIXEL_COUNT       2   // 
 
