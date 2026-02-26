@@ -10,7 +10,9 @@ struct __attribute__((packed)) ControlPacket {
     uint16_t header;       
     int16_t throttle; 
     bool elrsActive;
-    uint8_t checksum;      
+    int16_t button; 
+    uint8_t checksum;   
+    
 };
 
 // funkcia na výpočet checksumu

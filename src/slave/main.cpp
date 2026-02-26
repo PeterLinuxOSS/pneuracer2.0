@@ -12,8 +12,6 @@ volatile ControlPacket currentData; // Dáta prijaté od Mastera
 volatile bool isConnectionActive = false;
 SemaphoreHandle_t dataMutex;
 
-
-
 // --- PROTOTYPY ---
 void TaskComms(void *pvParameters);
 void setFailsafe();
@@ -28,7 +26,13 @@ unsigned long lastBlinkTime = 0;
 bool directionForward = true;
 bool valveA = LOW;
 bool valveB = LOW;
-
+int delayAfterSwitch = 0; // ms
+unsigned long forwardTimer = 0;
+unsigned long reverseTimer = 0;
+unsigned long movementStartTime = 0;
+int counter = 0;
+unsigned long nowBlink = 0;
+int delayMin = 0;
 void setup_NeoPixel()
 {
     StatusLed.begin();
@@ -84,7 +88,7 @@ void loop()
 
     ControlPacket localData;
     bool connectionOK;
-    
+
     if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
     {
         localData = *(const ControlPacket *)&currentData;
@@ -101,54 +105,98 @@ void loop()
         {
             StatusLed.fill(StatusLed.Color(0, 255, 0)); // Zelená - ELRS OK
 
-
-            if (localData.throttle > 180)
+            if (localData.throttle > 190)
             {
+                // 1. Výpočet delay (nepriama úmera)
+                // Plyn 185 -> 3000ms | Plyn 1800 -> 0ms
+
+                long currentDelayTarget = map(localData.throttle, 190, 1800, 3000, delayMin); // Ak je button6 stlačený, znížime max delay na 500ms
+                if (currentDelayTarget < delayMin)
+                    currentDelayTarget = delayMin; // ochrana
+
                 int h_start = analogRead(HALL_START);
                 int h_end = analogRead(HALL_END);
 
-                if (h_start > HALL_THRESHOLD && h_end > HALL_THRESHOLD)
+                // 2. Detekcia nárazu na senzor a zmena smeru
+                bool justHitSensor = false;
+
+                if (h_start < HALL_THRESHOLD && !directionForward)
                 {
-                    Serial.printf("---- H_Start: %4d | H_End: %4d | Dir: %s\n",
-                                  h_start, h_end, directionForward ? "FORWARD" : "REVERSE");
-                }else{
-                    if (h_start < HALL_THRESHOLD)
+                    directionForward = true;
+                    justHitSensor = true;
+                    counter++;
+                    // Čas od posledného štartu pohybu po náraz na tento senzor
+                    if (movementStartTime != 0)
                     {
-                        directionForward = true; // Narazil na štart -> choď vpred
+                        Serial.printf("Reverse movement duration: %lu ms\n", millis() - movementStartTime);
                     }
-                    else if (h_end < HALL_THRESHOLD)
-                    {
-                        directionForward = false; // Narazil na koniec -> choď vzad
-                    }
-                    Serial.printf("H_Start: %4d | H_End: %4d | Dir: %s\n",
-                              h_start, h_end, directionForward ? "FORWARD" : "REVERSE");
                 }
-                // --- NASTAVENIE VENTILOV ---
-                if (directionForward)
+                else if (h_end < HALL_THRESHOLD && directionForward)
                 {
-                    digitalWrite(VALVE_A, HIGH);
+                    directionForward = false;
+                    justHitSensor = true;
+                    counter++;
+                    // Čas od posledného štartu pohybu po náraz na tento senzor
+                    if (movementStartTime != 0)
+                    {
+                        Serial.printf("Forward movement duration: %lu ms\n", millis() - movementStartTime);
+                    }
+                }
+
+                if (justHitSensor)
+                {
+                    lastSwitchTime = millis();
+                    movementStartTime = 0; // Resetujeme, kým neskončí pauza
+                    delayMin = localData.button; // Aktualizujeme minimálny delay podľa tlačidla
+                }
+
+                // 3. Rozhodnutie: Bežíme alebo čakáme?
+                unsigned long timeSinceHit = millis() - lastSwitchTime;
+
+                if (timeSinceHit < (unsigned long)currentDelayTarget)
+                {
+                    // SME V PAUZE
+                    digitalWrite(VALVE_A, LOW);
                     digitalWrite(VALVE_B, LOW);
                 }
                 else
                 {
-                    digitalWrite(VALVE_A, LOW);
-                    digitalWrite(VALVE_B, HIGH);
-                }
+                    // POHYB SA PRÁVE ZAČAL alebo TRVÁ
+                    if (movementStartTime == 0)
+                    {
+                        movementStartTime = millis(); // Zaznamenáme presný moment štartu pohybu
+                    }
 
-                
+                    if (directionForward)
+                    {
+                        digitalWrite(VALVE_A, HIGH);
+                        digitalWrite(VALVE_B, LOW);
+                    }
+                    else
+                    {
+                        digitalWrite(VALVE_A, LOW);
+                        digitalWrite(VALVE_B, HIGH);
+                    }
+                }
+                if (millis() % 100 == 0)
+                { // Loguj len každých 100ms nech to nespamuje
+                    Serial.printf("Throttle: %d | Delay: %ld ms | Active: %s | Counter: %d\n",
+                                  localData.throttle, currentDelayTarget,
+                                  (millis() - lastSwitchTime < currentDelayTarget) ? "PAUSE" : "MOVING", counter);
+                }
             }
             else
             {
-                // Throttle je nízky
+                lastSwitchTime = 0; // Reset timer
+                // Throttle pod 185 - OFF
                 digitalWrite(VALVE_A, LOW);
                 digitalWrite(VALVE_B, LOW);
-                airServo.write(0);
             }
         }
         else
         {
             setFailsafe();
-            unsigned long nowBlink = millis();
+            nowBlink = millis();
             if (nowBlink - lastBlinkTime >= 1000UL)
             {
                 ledBlinkOn = !ledBlinkOn;
@@ -166,9 +214,22 @@ void loop()
     }
     else
     {
-        // FAILSAFE REŽIM 
+        // FAILSAFE REŽIM
         setFailsafe();
-        StatusLed.fill(StatusLed.Color(255, 0, 0)); // Červená
+        nowBlink = millis();
+        if (nowBlink - lastBlinkTime >= 1000UL)
+        {
+            ledBlinkOn = !ledBlinkOn;
+            lastBlinkTime = nowBlink;
+        }
+        if (ledBlinkOn)
+        {
+            StatusLed.fill(StatusLed.Color(255,0 , 255));
+        }
+        else
+        {
+            StatusLed.fill(StatusLed.Color(0, 0, 0));}
+        
     }
 
     StatusLed.show();
@@ -192,7 +253,7 @@ void TaskComms(void *pvParameters)
 
             if (Serial1.peek() != (PACKET_HEADER & 0xFF))
             {
-                Serial1.read(); 
+                Serial1.read();
                 continue;
             }
 
@@ -217,7 +278,7 @@ void TaskComms(void *pvParameters)
         { // 500ms bez signálu
             if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
             {
-                isConnectionActive = false; 
+                isConnectionActive = false;
                 xSemaphoreGive(dataMutex);
             }
         }
@@ -226,11 +287,10 @@ void TaskComms(void *pvParameters)
     }
 }
 
-
 void setFailsafe()
 {
     digitalWrite(VALVE_A, LOW);
     digitalWrite(VALVE_B, LOW);
-    StatusLed.fill(StatusLed.Color(255, 0, 255)); 
+    StatusLed.fill(StatusLed.Color(255, 0, 255));
     StatusLed.show();
 }

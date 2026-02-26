@@ -3,7 +3,7 @@
 class SlavePowerManager {
 public:
     void init() {
-        disablePower(); // Start with power off
+        disablePower();
     }
 
     void disablePower() {

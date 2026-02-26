@@ -26,6 +26,7 @@ volatile bool isFailsafeActive = true;
 volatile bool isLinkUp = false;
 volatile float batteryVoltage = 0.0;
 volatile bool button7 = false;
+volatile int16_t button = 0;
 
 
 uint32_t timeNow = 0;
@@ -36,6 +37,7 @@ static bool imuInitialized = false;  // Track if IMU initialized successfully
 const int attachMin = 1050;
 const int attachMax = 2500;
 const int desiredCenter = 2000;
+int mappedSteer;
 
 // --- DEFINÍCIE TASKOV ---
 void TaskSlaveComms(void *pvParameters);
@@ -73,17 +75,19 @@ void setup_CRSF() {
         while (1) delay(10);
     }
     crsf->setRcChannelsCallback(onReceiveRcChannels);
-    crsf->setLinkUpCallback([]() {
+    /*crsf->setLinkUpCallback([]() {
+        if (isLinkUp) return;
         isLinkUp = true;
         Serial.println("[CRSF] Link is UP");
         beep(100, 500);
-        delay(200);
-        beep(100, 500);
+        
     });
+    */
     crsf->setLinkDownCallback([]() {
+        if (!isLinkUp) return;
         isLinkUp = false;
         Serial.println("[CRSF] Link is DOWN");
-        beep(500, 200);
+        beep(100, 200);
     });
 
     
@@ -326,8 +330,8 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels) {
         int rawSteer = rcChannels->value[0];
        
         int baseSteer = map(rawSteer, 172, 1811, 1050, 2350);
-        const int baseCenter = (attachMin + attachMax) / 2; /
-        int mappedSteer = baseSteer + (desiredCenter - baseCenter);
+        const int baseCenter = (attachMin + attachMax) / 2; 
+        mappedSteer = baseSteer + (desiredCenter - baseCenter);
         mappedSteer = constrain(mappedSteer, attachMin, attachMax);
         
         steering.writeMicroseconds(mappedSteer);
@@ -346,6 +350,16 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels) {
             slavePower.enablePower();
             
         }
+
+        if (rcChannels->value[5] < 250 ) {
+            button = 0;
+        }else if (rcChannels->value[5] < 1000) {
+            button = 250;
+            
+        }else{
+            button = 750;
+        }
+        
         timeNow = millis();
         
         if (timeNow - lastBatteryUpdate >= 100)
@@ -385,6 +399,7 @@ void TaskSlaveComms(void *pvParameters) {
         
         packetToSend.throttle = currentThrottlePWM; 
         packetToSend.elrsActive = isLinkUp;
+        packetToSend.button = button;
         
         
 
