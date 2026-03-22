@@ -17,7 +17,13 @@ private:
     bool isConnected;
     
     void setupPowerPin() {
+<<<<<<< HEAD
+        pinMode(ELRS_SIG_PWR, INPUT);
         pinMode(ELRS_PWR_PIN, OUTPUT);
+        
+=======
+        pinMode(ELRS_PWR_PIN, OUTPUT);
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
         digitalWrite(ELRS_PWR_PIN, LOW); // Start with power off
     }
     
@@ -41,6 +47,11 @@ public:
         Serial.println("[ELRS] Powering up...");
         // Step 1: Enable power first
         digitalWrite(ELRS_PWR_PIN, HIGH);
+<<<<<<< HEAD
+        pinMode(ELRS_SIG_PWR, OUTPUT); // Set RX pin to input to avoid phantom voltage
+        digitalWrite(ELRS_SIG_PWR, LOW);
+=======
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
         delay(500); // Wait for power stabilization
         
         Serial.println("[ELRS] Initializing UART...");
@@ -67,6 +78,10 @@ public:
         Serial.println("[ELRS] Powering down...");
         pinMode(ELRS_RX_PIN, INPUT); // Set RX pin to input to avoid phantom voltage
         pinMode(ELRS_TX_PIN, INPUT); // Set RX pin to input to avoid phantom voltage
+<<<<<<< HEAD
+        pinMode(ELRS_SIG_PWR, INPUT);
+=======
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
         // Step 2: Cut power (after UART is stopped)
         digitalWrite(ELRS_PWR_PIN, LOW);
         

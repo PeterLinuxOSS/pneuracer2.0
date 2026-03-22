@@ -2,11 +2,21 @@
 #define ELRS_RX_PIN          4   // IO4
 #define ELRS_TX_PIN          5   // IO5
 #define ELRS_PWR_PIN         6   // IO6
+<<<<<<< HEAD
+#define ELRS_SIG_PWR         10   // IO10
+
+// Servos & Control
+#define SERVO_STEER          16  // IO16
+#define SERVO_BRAKE          13  // IO13
+#define SERVO_CLUTCH         21  // IO21
+#define SERVO_BUFFER         26  // IO26
+=======
 
 // Servos & Control
 #define SERVO_STEER          26  // IO26
 #define SERVO_BRAKE          47  // IO47
 #define SERVO_CLUTCH         21  // IO21
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
 
 // Communication
 #define SDA_PIN              2   // IO2
@@ -18,6 +28,10 @@
 
 // Sensors & Inputs
 #define VBAT_REF             15  // IO15
+<<<<<<< HEAD
+#define IMON_CURRENT         12  // IO12
+=======
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
 #define IMU_INT              8   // IO8
 #define VAL1_A               14  // IO36 
 #define VAL1_B               35  // IO35 
@@ -29,5 +43,9 @@
 
 //NeoPixel
 #define MASTER_STATUS_LED    3   // IO3
+<<<<<<< HEAD
+#define MASTER_STATUS_PWR    9   // IO9
+=======
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
 #define NEOPIXEL_COUNT       2   // 
 

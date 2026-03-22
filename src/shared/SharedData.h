@@ -10,7 +10,12 @@ struct __attribute__((packed)) ControlPacket {
     uint16_t header;       
     int16_t throttle; 
     bool elrsActive;
+<<<<<<< HEAD
+    int16_t button;
+    bool haltIMU; 
+=======
     int16_t button; 
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
     uint8_t checksum;   
     
 };
