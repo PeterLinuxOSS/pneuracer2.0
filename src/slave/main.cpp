@@ -35,6 +35,11 @@ unsigned long nowBlink = 0;
 int delayMin = 0;
 void setup_NeoPixel()
 {
+<<<<<<< HEAD
+    pinMode(STATUS_LED_PWR, OUTPUT);
+    digitalWrite(STATUS_LED_PWR, HIGH);
+=======
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
     StatusLed.begin();
     StatusLed.clear();
     StatusLed.setBrightness(50);
@@ -103,6 +108,64 @@ void loop()
 
         if (localData.elrsActive)
         {
+<<<<<<< HEAD
+            if (localData.haltIMU == false)
+            {
+                StatusLed.fill(StatusLed.Color(0, 255, 0)); // Zelená - ELRS OK
+
+                if (localData.throttle > 190)
+                {
+                    // 1. Výpočet delay (nepriama úmera)
+                    // Plyn 185 -> 3000ms | Plyn 1800 -> 0ms
+
+                    long currentDelayTarget = map(localData.throttle, 190, 1800, 3000, delayMin); // Ak je button6 stlačený, znížime max delay na 500ms
+                    if (currentDelayTarget < delayMin)
+                        currentDelayTarget = delayMin; // ochrana
+
+                    int h_start = analogRead(HALL_START);
+                    int h_end = analogRead(HALL_END);
+
+                    // 2. Detekcia nárazu na senzor a zmena smeru
+                    bool justHitSensor = false;
+
+                    if (h_start < HALL_THRESHOLD && !directionForward)
+                    {
+                        directionForward = true;
+                        justHitSensor = true;
+                        counter++;
+                        // Čas od posledného štartu pohybu po náraz na tento senzor
+                        if (movementStartTime != 0)
+                        {
+                            Serial.printf("Reverse movement duration: %lu ms\n", millis() - movementStartTime);
+                        }
+                    }
+                    else if (h_end < HALL_THRESHOLD && directionForward)
+                    {
+                        directionForward = false;
+                        justHitSensor = true;
+                        counter++;
+                        // Čas od posledného štartu pohybu po náraz na tento senzor
+                        if (movementStartTime != 0)
+                        {
+                            Serial.printf("Forward movement duration: %lu ms\n", millis() - movementStartTime);
+                        }
+                    }
+
+                    if (justHitSensor)
+                    {
+                        lastSwitchTime = millis();
+                        movementStartTime = 0;       // Resetujeme, kým neskončí pauza
+                        delayMin = localData.button; // Aktualizujeme minimálny delay podľa tlačidla
+                    }
+
+                    // 3. Rozhodnutie: Bežíme alebo čakáme?
+                    unsigned long timeSinceHit = millis() - lastSwitchTime;
+
+                    if (timeSinceHit < (unsigned long)currentDelayTarget)
+                    {
+                        // SME V PAUZE
+                        digitalWrite(VALVE_A, LOW);
+=======
             StatusLed.fill(StatusLed.Color(0, 255, 0)); // Zelená - ELRS OK
 
             if (localData.throttle > 190)
@@ -170,10 +233,43 @@ void loop()
                     if (directionForward)
                     {
                         digitalWrite(VALVE_A, HIGH);
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
                         digitalWrite(VALVE_B, LOW);
                     }
                     else
                     {
+<<<<<<< HEAD
+                        // POHYB SA PRÁVE ZAČAL alebo TRVÁ
+                        if (movementStartTime == 0)
+                        {
+                            movementStartTime = millis(); // Zaznamenáme presný moment štartu pohybu
+                        }
+
+                        if (directionForward)
+                        {
+                            digitalWrite(VALVE_A, HIGH);
+                            digitalWrite(VALVE_B, LOW);
+                        }
+                        else
+                        {
+                            digitalWrite(VALVE_A, LOW);
+                            digitalWrite(VALVE_B, HIGH);
+                        }
+                    }
+                    if (millis() % 100 == 0)
+                    { // Loguj len každých 100ms nech to nespamuje
+                        Serial.printf("Throttle: %d | Delay: %ld ms | Active: %s | Counter: %d\n",
+                                      localData.throttle, currentDelayTarget,
+                                      (millis() - lastSwitchTime < currentDelayTarget) ? "PAUSE" : "MOVING", counter);
+                    }
+                }
+                else
+                {
+                    lastSwitchTime = 0; // Reset timer
+                    // Throttle pod 185 - OFF
+                    digitalWrite(VALVE_A, LOW);
+                    digitalWrite(VALVE_B, LOW);
+=======
                         digitalWrite(VALVE_A, LOW);
                         digitalWrite(VALVE_B, HIGH);
                     }
@@ -183,14 +279,22 @@ void loop()
                     Serial.printf("Throttle: %d | Delay: %ld ms | Active: %s | Counter: %d\n",
                                   localData.throttle, currentDelayTarget,
                                   (millis() - lastSwitchTime < currentDelayTarget) ? "PAUSE" : "MOVING", counter);
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
                 }
             }
             else
             {
+<<<<<<< HEAD
+                StatusLed.fill(StatusLed.Color(0, 0, 255));
+                StatusLed.show();
+
+                setFailsafe();
+=======
                 lastSwitchTime = 0; // Reset timer
                 // Throttle pod 185 - OFF
                 digitalWrite(VALVE_A, LOW);
                 digitalWrite(VALVE_B, LOW);
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
             }
         }
         else
@@ -224,12 +328,21 @@ void loop()
         }
         if (ledBlinkOn)
         {
+<<<<<<< HEAD
+            StatusLed.fill(StatusLed.Color(255, 0, 255));
+        }
+        else
+        {
+            StatusLed.fill(StatusLed.Color(0, 0, 0));
+        }
+=======
             StatusLed.fill(StatusLed.Color(255,0 , 255));
         }
         else
         {
             StatusLed.fill(StatusLed.Color(0, 0, 0));}
         
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
     }
 
     StatusLed.show();
@@ -291,6 +404,9 @@ void setFailsafe()
 {
     digitalWrite(VALVE_A, LOW);
     digitalWrite(VALVE_B, LOW);
+<<<<<<< HEAD
+=======
     StatusLed.fill(StatusLed.Color(255, 0, 255));
+>>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
     StatusLed.show();
 }
