@@ -192,9 +192,9 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels)
         const int baseCenter = (SERVO_ATTACH_MIN + SERVO_ATTACH_MAX) / 2;
         mappedSteer = baseSteer + (SERVO_CENTER - baseCenter);
         mappedSteer = constrain(mappedSteer, SERVO_ATTACH_MIN, SERVO_ATTACH_MAX);
-
+        Serial.printf("Base Steer: %d | Mapped Steer: %d\n", baseSteer, mappedSteer);
         steering.writeMicroseconds(mappedSteer);
-
+        
         currentThrottlePWM = rcChannels->value[2];
         gearSwitch = rcChannels->value[4] > 1000;
         gear_change(gearSwitch);
