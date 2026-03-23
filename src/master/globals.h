@@ -15,9 +15,10 @@ const int ADC_RESOLUTION = 4095;        // 12-bitové ADC (0-4095)
 const float CONVERSION_FACTOR = 0.62;   // Výsledok (10uA/A * 62kOhm)
 
 // --- SERVO POZÍCIE (PWM MICROSEKÚNDY) ---
-const int SERVO_ATTACH_MIN = 1050;      // Minimální PWM pre servo
-const int SERVO_ATTACH_MAX = 2500;      // Maximálny PWM pre servo
-const int SERVO_CENTER = 2000;          // Stredná pozícia serva
+ 
+const int SERVO_ATTACH_MIN = 1600;      // Minimální PWM pre servo
+const int SERVO_ATTACH_MAX = 2460;      // Maximálny PWM pre servo
+const int SERVO_CENTER = 2030;          // Stredná pozícia serva
 
 // --- TILT DETEKCIA PRAHY ---
 const float TILT_WARNING_THRESHOLD = 30.0f;   // Varovanie pri 30° (gyro + accel hybrid)
