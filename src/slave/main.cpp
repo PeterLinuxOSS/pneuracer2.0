@@ -35,11 +35,8 @@ unsigned long nowBlink = 0;
 int delayMin = 0;
 void setup_NeoPixel()
 {
-<<<<<<< HEAD
     pinMode(STATUS_LED_PWR, OUTPUT);
     digitalWrite(STATUS_LED_PWR, HIGH);
-=======
->>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
     StatusLed.begin();
     StatusLed.clear();
     StatusLed.setBrightness(50);
