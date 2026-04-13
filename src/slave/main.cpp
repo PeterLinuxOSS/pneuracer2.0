@@ -105,7 +105,6 @@ void loop()
 
         if (localData.elrsActive)
         {
-<<<<<<< HEAD
             if (localData.haltIMU == false)
             {
                 StatusLed.fill(StatusLed.Color(0, 255, 0)); // Zelená - ELRS OK
@@ -162,80 +161,10 @@ void loop()
                     {
                         // SME V PAUZE
                         digitalWrite(VALVE_A, LOW);
-=======
-            StatusLed.fill(StatusLed.Color(0, 255, 0)); // Zelená - ELRS OK
-
-            if (localData.throttle > 190)
-            {
-                // 1. Výpočet delay (nepriama úmera)
-                // Plyn 185 -> 3000ms | Plyn 1800 -> 0ms
-
-                long currentDelayTarget = map(localData.throttle, 190, 1800, 3000, delayMin); // Ak je button6 stlačený, znížime max delay na 500ms
-                if (currentDelayTarget < delayMin)
-                    currentDelayTarget = delayMin; // ochrana
-
-                int h_start = analogRead(HALL_START);
-                int h_end = analogRead(HALL_END);
-
-                // 2. Detekcia nárazu na senzor a zmena smeru
-                bool justHitSensor = false;
-
-                if (h_start < HALL_THRESHOLD && !directionForward)
-                {
-                    directionForward = true;
-                    justHitSensor = true;
-                    counter++;
-                    // Čas od posledného štartu pohybu po náraz na tento senzor
-                    if (movementStartTime != 0)
-                    {
-                        Serial.printf("Reverse movement duration: %lu ms\n", millis() - movementStartTime);
-                    }
-                }
-                else if (h_end < HALL_THRESHOLD && directionForward)
-                {
-                    directionForward = false;
-                    justHitSensor = true;
-                    counter++;
-                    // Čas od posledného štartu pohybu po náraz na tento senzor
-                    if (movementStartTime != 0)
-                    {
-                        Serial.printf("Forward movement duration: %lu ms\n", millis() - movementStartTime);
-                    }
-                }
-
-                if (justHitSensor)
-                {
-                    lastSwitchTime = millis();
-                    movementStartTime = 0; // Resetujeme, kým neskončí pauza
-                    delayMin = localData.button; // Aktualizujeme minimálny delay podľa tlačidla
-                }
-
-                // 3. Rozhodnutie: Bežíme alebo čakáme?
-                unsigned long timeSinceHit = millis() - lastSwitchTime;
-
-                if (timeSinceHit < (unsigned long)currentDelayTarget)
-                {
-                    // SME V PAUZE
-                    digitalWrite(VALVE_A, LOW);
-                    digitalWrite(VALVE_B, LOW);
-                }
-                else
-                {
-                    // POHYB SA PRÁVE ZAČAL alebo TRVÁ
-                    if (movementStartTime == 0)
-                    {
-                        movementStartTime = millis(); // Zaznamenáme presný moment štartu pohybu
-                    }
-
-                    if (directionForward)
-                    {
-                        digitalWrite(VALVE_A, HIGH);
->>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
                         digitalWrite(VALVE_B, LOW);
                     }
                     else
                     {
-<<<<<<< HEAD
                         // POHYB SA PRÁVE ZAČAL alebo TRVÁ
                         if (movementStartTime == 0)
                         {
@@ -253,6 +182,7 @@ void loop()
                             digitalWrite(VALVE_B, HIGH);
                         }
                     }
+
                     if (millis() % 100 == 0)
                     { // Loguj len každých 100ms nech to nespamuje
                         Serial.printf("Throttle: %d | Delay: %ld ms | Active: %s | Counter: %d\n",
@@ -262,148 +192,97 @@ void loop()
                 }
                 else
                 {
+                    // Throttle pod 190 - OFF
+                    setFailsafe();
                     lastSwitchTime = 0; // Reset timer
-                    // Throttle pod 185 - OFF
-                    digitalWrite(VALVE_A, LOW);
-                    digitalWrite(VALVE_B, LOW);
-=======
-                        digitalWrite(VALVE_A, LOW);
-                        digitalWrite(VALVE_B, HIGH);
-                    }
-                }
-                if (millis() % 100 == 0)
-                { // Loguj len každých 100ms nech to nespamuje
-                    Serial.printf("Throttle: %d | Delay: %ld ms | Active: %s | Counter: %d\n",
-                                  localData.throttle, currentDelayTarget,
-                                  (millis() - lastSwitchTime < currentDelayTarget) ? "PAUSE" : "MOVING", counter);
->>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
                 }
             }
             else
             {
-<<<<<<< HEAD
-                StatusLed.fill(StatusLed.Color(0, 0, 255));
-                StatusLed.show();
-
+                // haltIMU == true - FAILSAFE REŽIM
                 setFailsafe();
-=======
-                lastSwitchTime = 0; // Reset timer
-                // Throttle pod 185 - OFF
-                digitalWrite(VALVE_A, LOW);
-                digitalWrite(VALVE_B, LOW);
->>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
+                nowBlink = millis();
+                if (nowBlink - lastBlinkTime >= 1000UL)
+                {
+                    ledBlinkOn = !ledBlinkOn;
+                    lastBlinkTime = nowBlink;
+                }
+                if (ledBlinkOn)
+                {
+                    StatusLed.fill(StatusLed.Color(0, 255, 255));
+                }
+                else
+                {
+                    StatusLed.fill(StatusLed.Color(0, 0, 0));
+                }
             }
         }
         else
         {
-            setFailsafe();
-            nowBlink = millis();
-            if (nowBlink - lastBlinkTime >= 1000UL)
-            {
-                ledBlinkOn = !ledBlinkOn;
-                lastBlinkTime = nowBlink;
-            }
-            if (ledBlinkOn)
-            {
-                StatusLed.fill(StatusLed.Color(0, 255, 255));
-            }
-            else
-            {
-                StatusLed.fill(StatusLed.Color(0, 0, 0));
-            }
-        }
-    }
-    else
-    {
-        // FAILSAFE REŽIM
-        setFailsafe();
-        nowBlink = millis();
-        if (nowBlink - lastBlinkTime >= 1000UL)
-        {
-            ledBlinkOn = !ledBlinkOn;
-            lastBlinkTime = nowBlink;
-        }
-        if (ledBlinkOn)
-        {
-<<<<<<< HEAD
-            StatusLed.fill(StatusLed.Color(255, 0, 255));
-        }
-        else
-        {
+            // ELRS nie je aktívny
             StatusLed.fill(StatusLed.Color(0, 0, 0));
         }
-=======
-            StatusLed.fill(StatusLed.Color(255,0 , 255));
         }
-        else
-        {
-            StatusLed.fill(StatusLed.Color(0, 0, 0));}
-        
->>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
+
+        StatusLed.show();
+
+        // Tu môžeš čítať Hall senzory a posielať späť Masterovi (ak to bude treba)
+        // bool pistonStart = digitalRead(HALL_START);
+
+        delay(10); // Stačí 100Hz refresh rate pre ventily
     }
 
-    StatusLed.show();
-
-    // Tu môžeš čítať Hall senzory a posielať späť Masterovi (ak to bude treba)
-    // bool pistonStart = digitalRead(HALL_START);
-
-    delay(10); // Stačí 100Hz refresh rate pre ventily
-}
-
-// --- TASK: KOMUNIKÁCIA (CORE 0) ---
-void TaskComms(void *pvParameters)
-{
-    ControlPacket tempPacket;
-    unsigned long lastPacketTime = 0;
-
-    for (;;)
+    // --- TASK: KOMUNIKÁCIA (CORE 0) ---
+    void TaskComms(void *pvParameters)
     {
-        if (Serial1.available() >= sizeof(ControlPacket))
-        {
+        ControlPacket tempPacket;
+        unsigned long lastPacketTime = 0;
 
-            if (Serial1.peek() != (PACKET_HEADER & 0xFF))
+        for (;;)
+        {
+            if (Serial1.available() >= sizeof(ControlPacket))
             {
-                Serial1.read();
-                continue;
+
+                if (Serial1.peek() != (PACKET_HEADER & 0xFF))
+                {
+                    Serial1.read();
+                    continue;
+                }
+
+                Serial1.readBytes((char *)&tempPacket, sizeof(ControlPacket));
+
+                // Kontrola integrity (Checksum)
+                if (tempPacket.header == PACKET_HEADER &&
+                    tempPacket.checksum == calculateChecksum(&tempPacket))
+                {
+
+                    if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
+                    {
+                        memcpy((void *)&currentData, &tempPacket, sizeof(ControlPacket));
+                        isConnectionActive = true;
+                        xSemaphoreGive(dataMutex);
+                    }
+                    lastPacketTime = millis();
+                }
             }
 
-            Serial1.readBytes((char *)&tempPacket, sizeof(ControlPacket));
-
-            // Kontrola integrity (Checksum)
-            if (tempPacket.header == PACKET_HEADER &&
-                tempPacket.checksum == calculateChecksum(&tempPacket))
-            {
-
+            if (millis() - lastPacketTime > 500)
+            { // 500ms bez signálu
                 if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
                 {
-                    memcpy((void *)&currentData, &tempPacket, sizeof(ControlPacket));
-                    isConnectionActive = true;
+                    isConnectionActive = false;
                     xSemaphoreGive(dataMutex);
                 }
-                lastPacketTime = millis();
             }
-        }
 
-        if (millis() - lastPacketTime > 500)
-        { // 500ms bez signálu
-            if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
-            {
-                isConnectionActive = false;
-                xSemaphoreGive(dataMutex);
-            }
+            vTaskDelay(5);
         }
-
-        vTaskDelay(5);
     }
-}
 
-void setFailsafe()
-{
-    digitalWrite(VALVE_A, LOW);
-    digitalWrite(VALVE_B, LOW);
-<<<<<<< HEAD
-=======
-    StatusLed.fill(StatusLed.Color(255, 0, 255));
->>>>>>> a558ea97db7e10b69e00cae73194578bf87e44e6
-    StatusLed.show();
-}
+    void setFailsafe()
+    {
+        digitalWrite(VALVE_A, LOW);
+        digitalWrite(VALVE_B, LOW);
+        StatusLed.fill(StatusLed.Color(255, 0, 255));
+        StatusLed.show();
+    }
