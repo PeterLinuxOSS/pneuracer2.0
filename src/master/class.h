@@ -11,13 +11,22 @@ public:
     }
 
     void disablePower() {
+        disableMotor();
         pinMode(SLAVE_RESET_BTN, OUTPUT);
         digitalWrite(SLAVE_RESET_BTN, LOW);
     }
 
     void enablePower() {
         pinMode(SLAVE_RESET_BTN, INPUT);
+        enableMotor();
     }
+
+    void disableMotor() { _motorEnabled = false; }
+    void enableMotor()  { _motorEnabled = true;  }
+    bool isMotorEnabled() const { return _motorEnabled; }
+
+private:
+    bool _motorEnabled = false;
 };
 
 class ServosPowerManager {

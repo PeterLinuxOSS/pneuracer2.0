@@ -33,5 +33,5 @@
 //NeoPixel
 #define MASTER_STATUS_LED    3   // IO3
 #define MASTER_STATUS_PWR    9   // IO9
-#define NEOPIXEL_COUNT       2   // 
+#define NEOPIXEL_COUNT       10   // 
 

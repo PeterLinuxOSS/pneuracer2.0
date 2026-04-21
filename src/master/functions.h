@@ -4,22 +4,28 @@
 #include <Arduino.h>
 #include <CRSFforArduino.hpp>
 
-// --- FORWARD DEKLARÁCIE FUNKCIÍ ---
+// --- FORWARD FUNCTION DECLARATIONS ---
 
-/// Funkcie pre buzzer a audio signály
+/// Functions for buzzer and audio signals
 void beep(int duration_ms, int frequency = 2000);
 
-/// IMU kaliácia a čítanie
+/// IMU calibration and reading
 void calibrate_imu();
 void read_and_display_imu();
 
-/// Kontrola ventilu
+/// Control valve
 void gear_change(bool value = false);
 
-/// CRSF callback pre RC kanály
+/// CRSF callback for RC channels
 void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels);
 
-/// Task na pozadí (CORE 0)
+/// Battery monitoring
+void check_battery();
+
+/// Request a beep sequence to be played by TaskSlaveComms
+void requestBeepPattern(uint8_t type, uint8_t count, uint16_t frequency, uint16_t duration_ms, uint16_t gap_ms);
+
+/// Task on background (CORE 0)
 void TaskSlaveComms(void *pvParameters);
 
 #endif // FUNCTIONS_H

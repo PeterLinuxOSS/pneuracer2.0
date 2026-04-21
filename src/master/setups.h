@@ -1,7 +1,7 @@
 #ifndef SETUPS_H
 #define SETUPS_H
 
-// --- SETUP FUNKCIE DEKLARÁCIE ---
+// --- SETUP FUNCTION DECLARATIONS ---
 void setup_buzzer();
 void setup_CRSF();
 void setup_ServoPWM();

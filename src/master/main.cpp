@@ -13,7 +13,7 @@
 #include "errors.h"
 #include "tilt_detection.h"
 
-// --- FUNKT CIA IMPLEMENTÁCIE V MAIN.CPP ---
+// --- FUNCTION IMPLEMENTATIONS IN MAIN.CPP ---
 
 void beep(int duration_ms, int frequency)
 {
@@ -23,6 +23,25 @@ void beep(int duration_ms, int frequency)
     ledcWrite(0, 0);
 };
 
+void requestBeepPattern(uint8_t type, uint8_t count, uint16_t frequency, uint16_t duration_ms, uint16_t gap_ms)
+{
+    if (beepRequestPending)
+    {
+        // Existing beep has priority if it is an error tone.
+        if (beepRequestType == BEEP_ERROR)
+        {
+            return;
+        }
+    }
+
+    beepRequestType = (BeepPatternType)type;
+    beepRequestCount = count;
+    beepRequestFrequency = frequency;
+    beepRequestDuration = duration_ms;
+    beepRequestGap = gap_ms;
+    beepRequestPending = true;
+}
+
 void calibrate_imu()
 {
     int numSamples = 500;
@@ -30,7 +49,7 @@ void calibrate_imu()
 
     for (int i = 0; i < numSamples; i++)
     {
-        // Deklaruj MIMO slučky!
+        // Use a non-blocking loop structure for sampling
         lsm6ds.getEvent(&accel, &gyro, &temp);
 
         gyroXoffset += gyro.gyro.x;
@@ -74,8 +93,6 @@ void setup()
     slavePower.init();
     Serial.begin(921600); // USB Debug
     Serial1.begin(921600, SERIAL_8N1, INTER_TX_S, INTER_RX_S);
-    pixels.fill(pixels.Color(255, 100, 0));
-    pixels.show();
     Serial.println("Starting MASTER setup...");
     setup_valves();
 
@@ -111,7 +128,7 @@ void setup()
     Serial.println("MASTER Setup Complete. Running Multithreaded.");
 }
 
-void gear_change(bool value)
+void gear_change(bool value) //unused
 {
     if (value)
     {
@@ -141,43 +158,151 @@ void read_and_display_imu()
     float corrected_ay = accel.acceleration.y - accelYoffset;
     float corrected_az = accel.acceleration.z - accelZoffset;
 
-    // --- DEBUG: Zobraž raw hodnoty ---
+    // --- DEBUG: Show raw values ---
     static unsigned long lastDebugTime = 0;
-    if (millis() - lastDebugTime > 500) {  // Každých 500ms
+    if (millis() - lastDebugTime > 500)
+    { // Every 500ms
         Serial.printf("[DEBUG] Gyro: X=%.2f Y=%.2f Z=%.2f | Accel: X=%.2f Y=%.2f Z=%.2f\n",
                       corrected_gx, corrected_gy, corrected_gz,
                       corrected_ax, corrected_ay, corrected_az);
         lastDebugTime = millis();
     }
 
-    // --- DETEKTUJ ABNORMÁLNY SKLON (COMPLEMENTARY FILTER: GYRO + ACCEL) ---
+    // --- DETECT ABNORMAL TILT (COMPLEMENTARY FILTER: GYRO + ACCEL) ---
     TiltData tilt = detect_abnormal_tilt(corrected_ax, corrected_ay, corrected_az,
-                                          corrected_gx, corrected_gy, corrected_gz);
-    
-    // --- DEBUG: Vždy zobraž tilt uhly ---
+                                         corrected_gx, corrected_gy, corrected_gz);
+
+    // --- DEBUG: Always show tilt angles ---
     static unsigned long lastTiltTime = 0;
-    if (millis() - lastTiltTime > 500) {  // Každých 500ms
+    if (millis() - lastTiltTime > 500)
+    { // Every 500ms
         Serial.printf("[TILT] Roll: %.1f° | Pitch: %.1f° | Threshold: %.1f°\n",
                       tilt.roll, tilt.pitch, TILT_WARNING_THRESHOLD);
         lastTiltTime = millis();
     }
-    
+
     if (tilt.isAbnormal)
     {
-        haltIMU = true;  // Nastav flag - beepovať bude TaskSlaveComms
+        haltIMU = true; // Set flag - TaskSlaveComms will handle beeping
         Serial.printf("  🚨 Roll: %.1f° | Pitch: %.1f° %s\n",
                       tilt.roll, tilt.pitch, tilt.isCritical ? "[CRITICAL]" : "[WARNING]");
     }
-    
-    
 }
-// --- HLAVNÁ SLUČKA (CORE 1) ---
+
+
+void check_battery()
+{
+    unsigned long now = millis();
+    if (now - lastBatteryUpdate < 100)
+    {
+        return;
+    }
+
+    int rawADC = analogRead(VBAT_REF);
+    int rawImon = analogRead(IMON_CURRENT);
+
+    float voltageImon = (rawImon * ADC_REF_VOLTAGE) / ADC_RESOLUTION;
+    imonCurrent = voltageImon / CONVERSION_FACTOR;
+
+    batteryVoltage = (rawADC / (float)ADC_RESOLUTION) * ADC_REF_VOLTAGE * 6.60;
+    bool currentlyConnected = batteryVoltage >= BATTERY_DISCONNECTED_THRESHOLD;
+
+    // Check for rapid voltage drop (indicates battery disconnection)
+    float voltageDrop = previousBatteryVoltage - batteryVoltage;
+    bool rapidDrop = (previousBatteryVoltage > 0) && (voltageDrop > BATTERY_DROP_THRESHOLD);
+    if (rapidDrop)
+    {
+        ignoreLowBatteryUntil = millis() + 5000; // Ignore low battery for 5 seconds after rapid drop
+        Serial.println("RAPID VOLTAGE DROP DETECTED - ignoring low battery for 5s");
+    }
+    previousBatteryVoltage = batteryVoltage;
+
+    if (!currentlyConnected)
+    {
+        if (batteryConnected)
+        {
+            Serial.println("BATTERY DISCONNECTED - switching to USB power");
+            requestBeepPattern(BEEP_BATTERY_DISCONNECT, 2, 1200, 120, 80);
+        }
+        batteryConnected = false;
+        usbPower = true;
+        batteryPercent = 100;
+
+        if (activeErrorCode == ERR_BATTERY_LOW)
+        {
+            errorActive = false;
+            activeErrorCode = ERR_NONE;
+            errorCritical = false;
+            haltIMU = false;
+        }
+
+        lastBatteryUpdate = now;
+        if (crsf)
+        {
+            crsf->telemetryWriteBattery(BATTERY_VOLTAGE_MAX, 0, 0, batteryPercent);
+        }
+        return;
+    }
+
+    if (!batteryConnected)
+    {
+        Serial.printf("BATTERY CONNECTED: %.2fV - switching to battery power\n", batteryVoltage);
+        requestBeepPattern(BEEP_BATTERY_CONNECT, 3, 2000, 100, 80);
+        batteryConnected = true;
+        usbPower = false;
+    }
+
+    if (batteryVoltage <= BATTERY_VOLTAGE_MIN)
+    {
+        batteryPercent = 0;
+    }
+    else if (batteryVoltage >= BATTERY_VOLTAGE_MAX)
+    {
+        batteryPercent = 100;
+    }
+    else
+    {
+        batteryPercent = (uint8_t)(((batteryVoltage - BATTERY_VOLTAGE_MIN) /
+                                    (BATTERY_VOLTAGE_MAX - BATTERY_VOLTAGE_MIN)) * 100.0);
+    }
+
+    lastBatteryUpdate = now;
+
+    if (crsf)
+    {
+        crsf->telemetryWriteBattery(batteryVoltage, 0, 0, batteryPercent);
+    }
+
+    if (batteryVoltage < BATTERY_VOLTAGE_CRITICAL && currentlyConnected && !rapidDrop && millis() > ignoreLowBatteryUntil)
+    {
+        lowBatteryCounter++;
+        if (lowBatteryCounter >= 5) // Require 5 consecutive low readings (about 0.5s)
+        {
+            Serial.printf("CRITICAL BATTERY: %.2fV < %.2fV\n", batteryVoltage, BATTERY_VOLTAGE_CRITICAL);
+            signalError(ERR_BATTERY_LOW, true);
+            lowBatteryCounter = 0; // Reset counter after triggering error
+        }
+    }
+    else
+    {
+        lowBatteryCounter = 0; // Reset counter if voltage recovers or rapid drop
+        if (activeErrorCode == ERR_BATTERY_LOW)
+        {
+            // Battery recovered or current power is USB, clear stale low-battery error
+            errorActive = false;
+            activeErrorCode = ERR_NONE;
+            errorCritical = false;
+            haltIMU = false;
+        }
+    }
+}
+// --- MAIN LOOP (CORE 1) ---
 void loop()
 {
     crsf->update();
 }
 
-// --- CRSF CALLBACK (Volané z Loopu) ---
+// --- CRSF CALLBACK (Called from loop) ---
 void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels)
 {
     bool fs = rcChannels->failsafe;
@@ -192,29 +317,29 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels)
         const int baseCenter = (SERVO_ATTACH_MIN + SERVO_ATTACH_MAX) / 2;
         mappedSteer = baseSteer + (SERVO_CENTER - baseCenter);
         mappedSteer = constrain(mappedSteer, SERVO_ATTACH_MIN, SERVO_ATTACH_MAX);
-        Serial.printf("Base Steer: %d | Mapped Steer: %d\n", baseSteer, mappedSteer);
+        // Serial.printf("Base Steer: %d | Mapped Steer: %d\n", baseSteer, mappedSteer);
         steering.writeMicroseconds(mappedSteer);
-        
+
         currentThrottlePWM = rcChannels->value[2];
-        gearSwitch = rcChannels->value[4] > 1000;
-        gear_change(gearSwitch);
+        Automatic = rcChannels->value[4] > 1000;
+        //
         isLinkUp = true;
         button7 = rcChannels->value[7] > 1000;
 
         if (button7)
         {
-            slavePower.disablePower();
+            slavePower.disableMotor();
         }
         else
         {
-            slavePower.enablePower();
+            slavePower.enableMotor();
         }
 
-        if (rcChannels->value[5] < 250)
+        if (rcChannels->value[6] < 250)
         {
             button = 0;
         }
-        else if (rcChannels->value[5] < 1000)
+        else if (rcChannels->value[6] < 1000)
         {
             button = 250;
         }
@@ -222,50 +347,41 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels)
         {
             button = 750;
         }
-        if (rcChannels->value[8] > 500)
-        {
-            haltIMU = false;
-        }
-        if (rcChannels->value[6] > 1000)
+        
+        
+        if (rcChannels->value[10] < 1000)
         {
             disableIMU  = true;
             haltIMU = false;
+            
         }else{
             disableIMU = false;
+            
+        }
+        
+        
+        if (rcChannels->value[5] < 250)
+        {
+            gearSwitch = 1;
+        }
+        else if (rcChannels->value[5] < 1200)
+        {
+            gearSwitch = 2;
+        }
+        else
+        {
+            gearSwitch = 3;
         }
 
-        timeNow = millis();
+        // ch[3] stick → servo microseconds 1200–1800, posielané priamo na slave
+        gearServoRaw = (int16_t)constrain(map(rcChannels->value[3], 172, 1811, 1200, 1800), 1200, 1800);
+        
+        AutomaticSpeed = map(rcChannels->value[9], 191, 1811, 1500, 3000);
 
-        if (timeNow - lastBatteryUpdate >= 100)
+        crsf->telemetryWriteBaroAltitude(AutomaticSpeed, 0);
+        if (!disableIMU)
         {
-            int rawADC = analogRead(VBAT_REF);
-            int rawImon = analogRead(IMON_CURRENT);
-            float voltageImon = (rawImon * ADC_REF_VOLTAGE) / ADC_RESOLUTION;
-            imonCurrent = voltageImon / CONVERSION_FACTOR;
-            // Voltage divider: (R28 + R29) / R29 = 118K / 18K = 6.556 (adjusted to 6.60 for calibration)
-            batteryVoltage = (rawADC / (float)ADC_RESOLUTION) * ADC_REF_VOLTAGE * 6.60;
-            lastBatteryUpdate = timeNow;
-            if (batteryVoltage < 9.0)
-            {
-                batteryPercent = 0;
-            }
-            else if (batteryVoltage > 12.6)
-            {
-                batteryPercent = 100;
-            }
-            else
-            {
-                batteryPercent = (uint8_t)(((batteryVoltage - 9.0) / 3.6) * 100.0);
-            }
-            if (batteryVoltage < 5.0)
-            {
-                batteryPercent = 100;
-            }
-            crsf->telemetryWriteBattery(batteryVoltage, 0, 0, batteryPercent);
-            if (!disableIMU)
-            {
-                read_and_display_imu();
-            }
+            read_and_display_imu();
         }
     }
     else
@@ -274,67 +390,147 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels)
     }
 }
 
-// --- TASK NA POZADÍ (CORE 0) ---
+// --- BACKGROUND TASK (CORE 0) ---
 void TaskSlaveComms(void *pvParameters)
 {
     ControlPacket packetToSend;
     packetToSend.header = PACKET_HEADER; // 0xBEEF
     uint32_t imuReadCounter = 0;
-    
+
     // Non-blocking beep timing
     static unsigned long lastBeepTime = 0;
     static bool beepActive = false;
     static unsigned long beepStartTime = 0;
     const unsigned long BEEP_DURATION = 150;  // ms
     const unsigned long BEEP_INTERVAL = 1000; // ms
+    
+    // Battery check timing
+    static unsigned long lastBatteryCheckTime = 0;
 
     for (;;)
     {
-        // --- FARBA LED ---
-        if (isFailsafeActive)
+        unsigned long now = millis();
+
+        // --- LED COLOR ---
+        if (errorActive)
         {
-            pixels.fill(pixels.Color(255, 0, 255)); // Červená - Failsafe
+            static unsigned long lastErrorBlink = 0;
+            static bool errorLedOn = true;
+            const unsigned long ERROR_BLINK_INTERVAL = 500;
+
+            if ((now - lastErrorBlink) >= ERROR_BLINK_INTERVAL)
+            {
+                errorLedOn = !errorLedOn;
+                lastErrorBlink = now;
+            }
+
+            if (errorLedOn)
+            {
+                pixels.fill(pixels.Color(255, 0, 0)); // Red - Error
+            }
+            else
+            {
+                pixels.clear();
+            }
+        }
+        else if (isFailsafeActive)
+        {
+            pixels.fill(pixels.Color(255, 0, 255)); // Purple - Failsafe
         }
         else if (haltIMU)
         {
-            pixels.fill(pixels.Color(255, 0, 0));   // Červená - IMU halt
+            pixels.fill(pixels.Color(255, 0, 0)); // Red - IMU halt
+        }
+        else if (!disableIMU)
+        {
+            static unsigned long lastBluePulse = 0;
+            const unsigned long BLUE_PULSE_INTERVAL = 1000;
+            const unsigned long BLUE_PULSE_DURATION = 100;
+
+            if ((now - lastBluePulse) >= BLUE_PULSE_INTERVAL)
+            {
+                pixels.fill(pixels.Color(0, 0, 255)); // Blue - IMU active
+                lastBluePulse = now;
+            }
+            else if ((now - lastBluePulse) >= BLUE_PULSE_DURATION)
+            {
+                pixels.fill(pixels.Color(0, 255, 0)); // Back to green
+            }
+            else
+            {
+                pixels.fill(pixels.Color(0, 0, 255)); // Blue during pulse
+            }
         }
         else
         {
-            pixels.fill(pixels.Color(0, 255, 0));   // Zelená - OK
+            pixels.fill(pixels.Color(0, 255, 0)); // Green - OK
         }
         pixels.show();
 
-        // --- NON-BLOCKING BEEP (keď haltIMU = true) ---
-        unsigned long now = millis();
-        
-        if (haltIMU)
+        // --- NON-BLOCKING BEEP MACHINE ---
+
+        static uint8_t beepCountLeft = 0;
+        const unsigned long HALT_BEEP_DURATION = 150;
+        const unsigned long HALT_BEEP_INTERVAL = 1000;
+
+        if (beepRequestPending && !beepActive && beepCountLeft == 0)
         {
-            // Beep každú sekundu
-            if ((now - lastBeepTime) >= BEEP_INTERVAL)
-            {
-                beepActive = true;
-                beepStartTime = now;
-                lastBeepTime = now;
-                
-                // Zapni buzzer
-                ledcSetup(0, 1500, 8);
-                ledcWrite(0, 180);
-            }
-        }
-        
-        // Vypni buzzer keď uplynula doba
-        if (beepActive && (now - beepStartTime) >= BEEP_DURATION)
-        {
-            ledcWrite(0, 0);
-            beepActive = false;
+            beepCountLeft = beepRequestCount;
+            beepRequestPending = false;
         }
 
-        // --- ODOSLANIE PACKETU ---
+        if (beepCountLeft > 0 && !beepActive && (now - lastBeepTime) >= beepRequestGap)
+        {
+            beepActive = true;
+            beepStartTime = now;
+            lastBeepTime = now;
+            ledcSetup(0, beepRequestFrequency, 8);
+            ledcWrite(0, 180);
+        }
+
+        if (haltIMU && !beepActive && beepCountLeft == 0 && (now - lastBeepTime) >= HALT_BEEP_INTERVAL)
+        {
+            beepActive = true;
+            beepStartTime = now;
+            lastBeepTime = now;
+            ledcSetup(0, 1500, 8);
+            ledcWrite(0, 180);
+        }
+
+        if (beepActive)
+        {
+            unsigned long activeDuration = (beepRequestType == BEEP_NONE) ? HALT_BEEP_DURATION : beepRequestDuration;
+            if ((now - beepStartTime) >= activeDuration)
+            {
+                ledcWrite(0, 0);
+                beepActive = false;
+                if (beepCountLeft > 0)
+                {
+                    beepCountLeft--;
+                    if (beepCountLeft == 0)
+                    {
+                        beepRequestType = BEEP_NONE;
+                    }
+                }
+            }
+        }
+
+        // --- BATTERY CHECK (every 500ms) ---
+        if (now - lastBatteryCheckTime > 500)
+        {
+            check_battery();
+            lastBatteryCheckTime = now;
+        }
+
+        // --- SENDING PACKET ---
         packetToSend.throttle = currentThrottlePWM;
         packetToSend.elrsActive = isLinkUp;
         packetToSend.button = button;
         packetToSend.haltIMU = haltIMU;
+        packetToSend.Automatic = Automatic;
+        packetToSend.AutomaticSpeed = AutomaticSpeed;
+        packetToSend.Gear = gearSwitch;
+        packetToSend.motorEnable = slavePower.isMotorEnabled();
 
         packetToSend.checksum = calculateChecksum(&packetToSend);
         Serial1.write((uint8_t *)&packetToSend, sizeof(ControlPacket));

@@ -4,16 +4,16 @@
 #include <Arduino.h>
 #include <cmath>
 
-// --- TILT DETEKOVANIE ŠTRUKTÚRA ---
+// --- TILT DETECTION STRUCTURE ---
 struct TiltData {
-    float roll;           // Uhol náklonu doľava/doprava (degrees)
-    float pitch;          // Uhol náklonu dopredu/dozadu (degrees)
-    bool isAbnormal;      // True ak je náklón > 30°
-    bool isCritical;      // True ak je náklón > 45°
+    float roll;           // Tilt angle left/right (degrees)
+    float pitch;          // Tilt angle forward/backward (degrees)
+    bool isAbnormal;      // True if tilt > 30°
+    bool isCritical;      // True if tilt > 45°
 };
 
-// --- TILT DETEKCIA FUNKCIE (COMPLEMENTARY FILTER) ---
-// Kombinuje gyroscope (krátkoterm rotácia) + accelerometer (dlhodobá korekcija)
+// --- TILT DETECTION FUNCTION (COMPLEMENTARY FILTER) ---
+// Combines gyroscope (short-term rotation) + accelerometer (long-term correction)
 TiltData detect_abnormal_tilt(float accel_x, float accel_y, float accel_z,
                                float gyro_x, float gyro_y, float gyro_z);
 

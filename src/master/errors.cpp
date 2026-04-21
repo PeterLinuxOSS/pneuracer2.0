@@ -3,57 +3,33 @@
 #include "globals.h"
 #include "functions.h"
 
-// --- SIGNALIZÁCIA CHÝB BUZZEROM A LED ---
+// --- ERROR SIGNALING WITH BUZZER AND LED ---
 
 void signalError(ErrorCode code, bool critical) {
     Serial.printf("ERROR CODE: %d\n", code);
-    
-    // Červená LED - blikajúca
-    for (int i = 0; i < 5; i++) {
-        pixels.fill(pixels.Color(255, 0, 0));  // Červená
-        pixels.show();
-        delay(200);
-        pixels.clear();
-        pixels.show();
-        delay(200);
+    errorActive = true;
+    activeErrorCode = code;
+    errorCritical = critical;
+
+    if (code == ERR_BATTERY_LOW)
+    {
+        slavePower.disableMotor();
+        haltIMU = true;
     }
-    
-    // Beepy - počet = error code
-    for (int i = 0; i < code; i++) {
-        beep(200, 1000);  // Nízky zvuk pre chybu
-        delay(300);
-    }
-    
-    // Čakanie - aby sa dal troubleshoot
-    delay(1000);
-    
-    if (critical) {
-        // Kritická chyba - zastav program
-        Serial.println("CRITICAL ERROR - HALTED!");
-        while (1) {
-            // Opakovane blikaj červenou
-            pixels.fill(pixels.Color(255, 0, 0));
-            pixels.show();
-            delay(500);
-            pixels.clear();
-            pixels.show();
-            delay(500);
-        }
+
+    if (!beepRequestPending || beepRequestType != BEEP_ERROR)
+    {
+        requestBeepPattern(BEEP_ERROR, code > 0 ? code : 1, 1000, 200, 300);
     }
 }
 
 void signalSuccess() {
     Serial.println("SETUP OK!");
-    
-    // Zelená LED - stála
     pixels.fill(pixels.Color(0, 255, 0));
     pixels.show();
-    
-    // 3x úspešný beep - vysoký tón
-    for (int i = 0; i < 3; i++) {
-        beep(150, 2500);  // Vysoký zvuk pre úspech
-        delay(200);
+
+    if (!beepRequestPending)
+    {
+        requestBeepPattern(BEEP_SUCCESS, 3, 2500, 150, 200);
     }
-    
-    delay(500);
 }

@@ -6,7 +6,7 @@
 #include "setups.h"          // Setup function declarations
 #include "errors.h"          // Error handling
 
-// --- SETUP FUNKCIE IMPLEMENTÁCIE ---
+// --- SETUP FUNCTION IMPLEMENTATIONS ---
 
 void setup_buzzer() {
     // Setup PWM for buzzer (frequency 200 Hz, 8-bit resolution)
@@ -66,8 +66,16 @@ void setup_NeoPixel() {
     digitalWrite(MASTER_STATUS_PWR, HIGH);
     pixels.begin();
     pixels.clear();
-    pixels.setBrightness(50); 
-    
+    pixels.setBrightness(50); // Increased from 50 to 150 for better visibility
+
+    // Test pattern: light up all LEDs one by one
+    for(int i = 0; i < NEOPIXEL_COUNT; i++) {
+        pixels.setPixelColor(i, pixels.Color(255, 255, 255)); // White
+        pixels.show();
+        delay(100);
+    }
+    delay(500);
+    pixels.clear();
     pixels.show();
 }
 
@@ -76,7 +84,7 @@ void setup_valves() {
     pinMode(VAL1_B, OUTPUT);
     digitalWrite(VAL1_A, HIGH);
     digitalWrite(VAL1_B, HIGH);
-    delay(1000); // Krátka pauza pre stabilizáciu
+    delay(1000); // Short pause for stabilization
     digitalWrite(VAL1_A, LOW);
     digitalWrite(VAL1_B, LOW);
     Serial.println("Valves initialized and set to default state");

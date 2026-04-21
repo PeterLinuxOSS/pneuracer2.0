@@ -1,14 +1,17 @@
 #include <Arduino.h>
 #include <ESP32Servo.h>
 #include <Adafruit_NeoPixel.h>
-#include "shared/SharedData.h" // Tvoja zdieľaná štruktúra
+#include <Wire.h>
+#include <AS5600.h>
+#include "shared/SharedData.h" // Your shared structure
 #include "pins.h"
 
 Servo airServo;
 Adafruit_NeoPixel StatusLed(NEOPIXEL_COUNT, STATUS_LED, NEO_GRB + NEO_KHZ800);
+AS5600 as5600;
 
-// --- ZDIEĽANÉ DÁTA (Thread Safe) ---
-volatile ControlPacket currentData; // Dáta prijaté od Mastera
+// --- SHARED DATA (Thread Safe) ---
+volatile ControlPacket currentData; // Data received from Master
 volatile bool isConnectionActive = false;
 SemaphoreHandle_t dataMutex;
 
@@ -33,6 +36,22 @@ unsigned long movementStartTime = 0;
 int counter = 0;
 unsigned long nowBlink = 0;
 int delayMin = 0;
+
+// AS5600 variables
+uint16_t prev_angle = 0;
+unsigned long prev_time = 0;
+float angular_speed = 0.0; // degrees per second
+
+bool automaticPrev = false;
+float automaticTargetSpeed = 0.0; // target speed in deg/s for Automatic mode
+int servoPosition = 90;           // default servo position (0-180)
+long currentDelayTarget = 3000;   // delay between valve switch in ms
+int currentGear = 2;              // default gear (neutral)
+int lastServoGear = -1;           // tracks what gear servo is actually set to
+unsigned long gearShiftTimer = 0;
+bool gearUpCondition = false;
+bool gearDownCondition = false;
+
 void setup_NeoPixel()
 {
     pinMode(STATUS_LED_PWR, OUTPUT);
@@ -49,6 +68,10 @@ void setup()
     setup_NeoPixel();
     Serial.begin(921600); // USB Debug
 
+    // I2C for AS5600
+    Wire.begin(SDA_PIN, SCL_PIN);
+    as5600.begin();
+
     // UART ku Masterovi
     Serial1.begin(921600, SERIAL_8N1, UART_RX, UART_TX);
 
@@ -57,19 +80,20 @@ void setup()
     pinMode(VALVE_B, OUTPUT);
     digitalWrite(VALVE_A, LOW);
     digitalWrite(VALVE_B, LOW);
-    pinMode(HALL_START, INPUT); // Alebo INPUT_PULLUP ak treba
+    pinMode(HALL_START, INPUT); // Or INPUT_PULLUP if needed
     pinMode(HALL_END, INPUT);
-    delay(1000); // Krátka pauza pro stabilizáciu
+    delay(1000); // Short pause for stabilization
 
     // Servo setup
     ESP32PWM::allocateTimer(0);
     airServo.setPeriodHertz(333);
     airServo.attach(SERVO_REG, 500, 2500);
+    airServo.write(servoPosition); // Set default position
 
     // Mutex
     dataMutex = xSemaphoreCreateMutex();
 
-    // Spustenie Tasku pre komunikáciu (Core 0)
+    // Start communication task (Core 0)
     xTaskCreatePinnedToCore(
         TaskComms,
         "Comms",
@@ -77,7 +101,7 @@ void setup()
         NULL,
         1,
         NULL,
-        0 // Beží na jadre 0
+        0 // Runs on core 0
     );
 
     Serial.println("SLAVE ESP32-S3 Ready");
@@ -85,8 +109,8 @@ void setup()
 
 void loop()
 {
-    // --- HLAVNÁ SLUČKA (CORE 1) - OVLÁDANIE ---
-    // Toto beží rýchlo a stará sa o fyzické piny
+    // --- MAIN LOOP (CORE 1) - CONTROL ---
+    // This runs fast and manages physical pins
 
     ControlPacket localData;
     bool connectionOK;
@@ -98,6 +122,27 @@ void loop()
         xSemaphoreGive(dataMutex);
     }
 
+    // Read AS5600 raw angle
+    uint16_t current_angle = as5600.rawAngle();
+    unsigned long current_time = millis();
+    if (prev_time != 0)
+    {
+        unsigned long delta_t = current_time - prev_time;
+        if (delta_t > 0)
+        {
+            int16_t delta_angle = current_angle - prev_angle;
+            // Handle wrap around (12-bit, 0-4095)
+            if (delta_angle > 2048)
+                delta_angle -= 4096;
+            if (delta_angle < -2048)
+                delta_angle += 4096;
+            angular_speed = (delta_angle * 360.0 / 4096.0) / (delta_t / 1000.0); // degrees per second
+        }
+    }
+    prev_angle = current_angle;
+    prev_time = current_time;
+    // Print raw angle and speed
+
     if (connectionOK)
     {
         int val1 = analogRead(HALL_START);
@@ -107,21 +152,123 @@ void loop()
         {
             if (localData.haltIMU == false)
             {
-                StatusLed.fill(StatusLed.Color(0, 255, 0)); // Zelená - ELRS OK
+                if (localData.motorEnable)
+                    StatusLed.fill(StatusLed.Color(0, 255, 0));   // Green - motor active
+                else
+                    StatusLed.fill(StatusLed.Color(255, 80, 0));  // Orange - motor disabled, shifting OK
 
-                if (localData.throttle > 190)
+                // --- MODE-SPECIFIC DELAY CALCULATION ---
+                bool motorActive = false;
+
+                if (localData.Automatic == true)
                 {
-                    // 1. Výpočet delay (nepriama úmera)
-                    // Plyn 185 -> 3000ms | Plyn 1800 -> 0ms
+                    delayMin = localData.button; // button controls minimum delay in automatic mode
 
-                    long currentDelayTarget = map(localData.throttle, 190, 1800, 3000, delayMin); // Ak je button6 stlačený, znížime max delay na 500ms
-                    if (currentDelayTarget < delayMin)
-                        currentDelayTarget = delayMin; // ochrana
+                    if (!automaticPrev)
+                    {
+                        automaticPrev = true;
+                        automaticTargetSpeed = (localData.AutomaticSpeed > 0) ? localData.AutomaticSpeed : 2000.0;
+                        currentDelayTarget = delayMin; // start with button value
+                        currentGear = 1;               // start with gear 1 in automatic mode (servo: 900µs)
+                    }
+                    else if (localData.AutomaticSpeed != automaticTargetSpeed && localData.AutomaticSpeed > 0)
+                    {
+                        automaticTargetSpeed = localData.AutomaticSpeed;
+                    }
 
+                    // throttle controls speed tolerance from 20 to 500
+                    int speedTolerance = map(localData.throttle, 190, 1800, 1, 500);
+                    speedTolerance = constrain(speedTolerance, 20, 500);
+
+                    float targetLow = automaticTargetSpeed - speedTolerance;
+                    float kp = 0.04;        // proportional gain for delay adjustment
+                    int maxAdjustment = 15; // limit how much delay changes each cycle
+
+                    if (angular_speed > automaticTargetSpeed)
+                    {
+                        int adjustment = (int)((angular_speed - automaticTargetSpeed) * kp);
+                        adjustment = constrain(adjustment, 1, maxAdjustment);
+                        currentDelayTarget += adjustment;
+                    }
+                    else if (angular_speed < targetLow)
+                    {
+                        int adjustment = (int)((targetLow - angular_speed) * kp);
+                        adjustment = constrain(adjustment, 1, maxAdjustment);
+                        currentDelayTarget -= adjustment;
+                    }
+                    else
+                    {
+                        currentDelayTarget += 1; // coast
+                    }
+                    currentDelayTarget = constrain(currentDelayTarget, delayMin, 3000);
+                    motorActive = true;
+
+                    // Automatic gear shifting based on speed with delay
+                    // Gear values: 1=gear1 (900µs), 3=gear2 (2200µs) — 2 is neutral, not used in auto
+                    if (angular_speed >= automaticTargetSpeed * 0.75 && currentGear == 1)
+                    {
+                        if (!gearUpCondition)
+                        {
+                            gearUpCondition = true;
+                            gearShiftTimer = millis();
+                        }
+                        else if (millis() - gearShiftTimer > 1000)
+                        {
+                            currentGear = 3;
+                            gearUpCondition = false;
+                        }
+                    }
+                    else
+                    {
+                        gearUpCondition = false;
+                    }
+
+                    if (angular_speed < automaticTargetSpeed * 0.7 && currentGear == 3)
+                    {
+                        if (!gearDownCondition)
+                        {
+                            gearDownCondition = true;
+                            gearShiftTimer = millis();
+                        }
+                        else if (millis() - gearShiftTimer > 1000)
+                        {
+                            currentGear = 1;
+                            gearDownCondition = false;
+                        }
+                    }
+                    else
+                    {
+                        gearDownCondition = false;
+                    }
+
+                    if (millis() % 100 == 0)
+                    {
+                        Serial.printf("Auto target: %.1f, actual: %.1f, delay: %ld, gear: %d\n", automaticTargetSpeed, angular_speed, currentDelayTarget, currentGear);
+                    }
+                }
+                else
+                {
+                    automaticPrev = false;
+                    motorActive = (localData.throttle > 200);
+
+                    if (motorActive)
+                    {
+                        currentDelayTarget = map(localData.throttle, 200, 1800, 3000, delayMin);
+                        if (currentDelayTarget < delayMin)
+                            currentDelayTarget = delayMin;
+                        delayMin = localData.button; // button sets min delay
+                    }
+                }
+
+                // --- SHARED VALVE CONTROL LOGIC ---
+                bool pistonMoving = false;
+
+                if (motorActive && localData.motorEnable)
+                {
                     int h_start = analogRead(HALL_START);
                     int h_end = analogRead(HALL_END);
 
-                    // 2. Detekcia nárazu na senzor a zmena smeru
+                    // Detect sensor hit and change direction
                     bool justHitSensor = false;
 
                     if (h_start < HALL_THRESHOLD && !directionForward)
@@ -129,46 +276,35 @@ void loop()
                         directionForward = true;
                         justHitSensor = true;
                         counter++;
-                        // Čas od posledného štartu pohybu po náraz na tento senzor
-                        if (movementStartTime != 0)
-                        {
-                            Serial.printf("Reverse movement duration: %lu ms\n", millis() - movementStartTime);
-                        }
                     }
                     else if (h_end < HALL_THRESHOLD && directionForward)
                     {
                         directionForward = false;
                         justHitSensor = true;
                         counter++;
-                        // Čas od posledného štartu pohybu po náraz na tento senzor
-                        if (movementStartTime != 0)
-                        {
-                            Serial.printf("Forward movement duration: %lu ms\n", millis() - movementStartTime);
-                        }
                     }
 
                     if (justHitSensor)
                     {
                         lastSwitchTime = millis();
-                        movementStartTime = 0;       // Resetujeme, kým neskončí pauza
-                        delayMin = localData.button; // Aktualizujeme minimálny delay podľa tlačidla
+                        movementStartTime = 0;
                     }
 
-                    // 3. Rozhodnutie: Bežíme alebo čakáme?
                     unsigned long timeSinceHit = millis() - lastSwitchTime;
 
                     if (timeSinceHit < (unsigned long)currentDelayTarget)
                     {
-                        // SME V PAUZE
+                        // PAUSE
                         digitalWrite(VALVE_A, LOW);
                         digitalWrite(VALVE_B, LOW);
                     }
                     else
                     {
-                        // POHYB SA PRÁVE ZAČAL alebo TRVÁ
+                        // MOVEMENT
+                        pistonMoving = true;
                         if (movementStartTime == 0)
                         {
-                            movementStartTime = millis(); // Zaznamenáme presný moment štartu pohybu
+                            movementStartTime = millis();
                         }
 
                         if (directionForward)
@@ -182,20 +318,45 @@ void loop()
                             digitalWrite(VALVE_B, HIGH);
                         }
                     }
-                    if (millis() % 100 == 0)
-                    { // Loguj len každých 100ms nech to nespamuje
-                        Serial.printf("Throttle: %d | Delay: %ld ms | Active: %s | Counter: %d\n",
-                                      localData.throttle, currentDelayTarget,
-                                      (millis() - lastSwitchTime < currentDelayTarget) ? "PAUSE" : "MOVING", counter);
-                    }
                 }
                 else
                 {
-                    lastSwitchTime = 0; // Reset timer
-                    // Throttle pod 185 - OFF
+                    lastSwitchTime = 0;
                     digitalWrite(VALVE_A, LOW);
                     digitalWrite(VALVE_B, LOW);
                 }
+
+                // --- SERVO GEAR CONTROL ---
+                // Gear change only when piston is moving; always neutral otherwise
+                int targetGear = (localData.Automatic && localData.motorEnable) ? currentGear : localData.Gear;
+                if (!localData.motorEnable)
+                {
+                    // Motor disabled - always shift to neutral
+                    servoPosition = 1500;
+                    airServo.writeMicroseconds(servoPosition);
+                    lastServoGear = 2;
+                }
+                else if (pistonMoving)
+                {
+                    if (targetGear != lastServoGear)
+                    {
+                        if (targetGear == 1)
+                            servoPosition = 1800;
+                        else if (targetGear == 2)
+                            servoPosition = 1500;
+                        else if (targetGear == 3)
+                            servoPosition = 1200;
+                        airServo.writeMicroseconds(servoPosition);
+                        lastServoGear = targetGear;
+                    }
+                }
+                else if (localData.Automatic == false)
+                {
+                    servoPosition = 1500;
+                    airServo.writeMicroseconds(servoPosition);
+                    lastServoGear = 2;
+                }
+                
             }
             else
             {
@@ -226,7 +387,7 @@ void loop()
     }
     else
     {
-        // FAILSAFE REŽIM
+        // FAILSAFE MODE
         setFailsafe();
         nowBlink = millis();
         if (nowBlink - lastBlinkTime >= 1000UL)
@@ -246,13 +407,13 @@ void loop()
 
     StatusLed.show();
 
-    // Tu môžeš čítať Hall senzory a posielať späť Masterovi (ak to bude treba)
+    // Here you can read Hall sensors and send back to Master if needed
     // bool pistonStart = digitalRead(HALL_START);
 
-    delay(10); // Stačí 100Hz refresh rate pre ventily
+    delay(10); // 100Hz refresh rate is enough for valves
 }
 
-// --- TASK: KOMUNIKÁCIA (CORE 0) ---
+// --- TASK: COMMUNICATION (CORE 0) ---
 void TaskComms(void *pvParameters)
 {
     ControlPacket tempPacket;
@@ -271,7 +432,7 @@ void TaskComms(void *pvParameters)
 
             Serial1.readBytes((char *)&tempPacket, sizeof(ControlPacket));
 
-            // Kontrola integrity (Checksum)
+            // Integrity check (Checksum)
             if (tempPacket.header == PACKET_HEADER &&
                 tempPacket.checksum == calculateChecksum(&tempPacket))
             {
@@ -287,7 +448,7 @@ void TaskComms(void *pvParameters)
         }
 
         if (millis() - lastPacketTime > 500)
-        { // 500ms bez signálu
+        { // 500ms without signal
             if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
             {
                 isConnectionActive = false;
