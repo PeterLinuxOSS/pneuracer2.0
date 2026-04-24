@@ -12,7 +12,8 @@ struct __attribute__((packed)) ControlPacket {
     int16_t throttle; 
     bool elrsActive;
     int16_t button;
-    bool haltIMU; 
+    bool haltIMU;
+    bool brake;
     bool Automatic;
     int16_t AutomaticSpeed;
     int16_t Gear;

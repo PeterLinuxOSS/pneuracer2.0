@@ -47,17 +47,25 @@ void setup_CRSF() {
 void setup_ServoPWM() {
     servosPower.init();
     steering.setPeriodHertz(333);
+    servo_break.setPeriodHertz(333);
     Serial.println("Attaching servo...");
+    
     
     if (!steering.attach(SERVO_STEER, SERVO_ATTACH_MIN, SERVO_ATTACH_MAX)) {
         Serial.println("ERROR: Servo attach FAILED!");
         signalError(ERR_SERVO_INIT, false);  // Non-critical
         return;
     }
+    if (!servo_break.attach(SERVO_BRAKE, SERVO_ATTACH_MIN, SERVO_ATTACH_MAX)) {
+        Serial.println("ERROR: Servo attach FAILED!");
+        signalError(ERR_SERVO_INIT, false);  // Non-critical
+        return;
+    }
     
-    Serial.println("✓ Servo OK");
     servosPower.enablePower();
-    steering.writeMicroseconds(currentSteerPWM);
+    Serial.println("✓ Servo OK");
+    steering.writeMicroseconds(1500);
+    
     Serial.println("✓ Steering servo initialized");
 }
 
@@ -66,17 +74,9 @@ void setup_NeoPixel() {
     digitalWrite(MASTER_STATUS_PWR, HIGH);
     pixels.begin();
     pixels.clear();
-    pixels.setBrightness(50); // Increased from 50 to 150 for better visibility
-
-    // Test pattern: light up all LEDs one by one
-    for(int i = 0; i < NEOPIXEL_COUNT; i++) {
-        pixels.setPixelColor(i, pixels.Color(255, 255, 255)); // White
-        pixels.show();
-        delay(100);
-    }
-    delay(500);
-    pixels.clear();
+    pixels.setBrightness(150); 
     pixels.show();
+
 }
 
 void setup_valves() {

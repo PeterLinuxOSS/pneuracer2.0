@@ -5,9 +5,9 @@
 #define ELRS_SIG_PWR         10   // IO10
 
 // Servos & Control
-#define SERVO_STEER          16  // IO16
-#define SERVO_BRAKE          13  // IO13
-#define SERVO_CLUTCH         21  // IO21
+#define SERVO_BRAKE          35  // IO16
+#define SERVO_STEER          16  // IO35
+#define SERVO_CLUTCH         13  // IO21
 #define SERVO_BUFFER         26  // IO26
 
 // Communication
@@ -23,7 +23,7 @@
 #define IMON_CURRENT         12  // IO12
 #define IMU_INT              8   // IO8
 #define VAL1_A               14  // IO36 
-#define VAL1_B               35  // IO35 
+#define VAL1_B               21  // IO35 
 #define BUTTON               7  // IO7
 
 // Buttons & System
@@ -33,5 +33,5 @@
 //NeoPixel
 #define MASTER_STATUS_LED    3   // IO3
 #define MASTER_STATUS_PWR    9   // IO9
-#define NEOPIXEL_COUNT       10   // 
+#define NEOPIXEL_COUNT       29   // 
 

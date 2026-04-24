@@ -9,6 +9,7 @@
 
 // --- GLOBAL OBJECTS - DEF ---
 Servo steering;
+Servo servo_break;
 Adafruit_NeoPixel pixels(NEOPIXEL_COUNT, MASTER_STATUS_LED, NEO_GRB + NEO_KHZ800);
 Adafruit_LSM6DS lsm6ds;
 ELRSManager elrsManager;
@@ -17,13 +18,14 @@ SlavePowerManager slavePower;
 ServosPowerManager servosPower;
 
 // --- SHARED VARIABLES (RC CHANNELS) - DEF ---
-volatile int currentSteerPWM = 2000;
+
 volatile int currentThrottlePWM = 0;
 volatile int16_t gearSwitch = 2;
 volatile int16_t gearServoRaw = 1500;
 volatile bool button7 = false;
 volatile int16_t button = 0;
 volatile bool Automatic = false;
+volatile bool brakeActive = false;
 volatile int16_t AutomaticSpeed;
 
 // --- SHARED VARIABLES (COMMUNICATION) - DEF ---
@@ -68,5 +70,4 @@ float accelXoffset = 0, accelYoffset = 0, accelZoffset = 0;
 // --- BATTERY LOW DETECTION ---
 uint8_t lowBatteryCounter = 0;
 float previousBatteryVoltage = 0.0;
-const float BATTERY_DROP_THRESHOLD = 2.0f; // V - rapid drop indicates disconnection
 unsigned long ignoreLowBatteryUntil = 0;

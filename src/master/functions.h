@@ -28,4 +28,9 @@ void requestBeepPattern(uint8_t type, uint8_t count, uint16_t frequency, uint16_
 /// Task on background (CORE 0)
 void TaskSlaveComms(void *pvParameters);
 
+/// Knight Rider scanner animation (KITT effect)
+bool knightRiderStep();
+void setKnightRiderColor(uint8_t r, uint8_t g, uint8_t b);
+void bootKnightRider(unsigned long durationMs, uint8_t r = 255, uint8_t g = 0, uint8_t b = 0);
+
 #endif // FUNCTIONS_H

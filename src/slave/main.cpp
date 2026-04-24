@@ -5,13 +5,14 @@
 #include <AS5600.h>
 #include "shared/SharedData.h" // Your shared structure
 #include "pins.h"
+#include "config.h"
 
 Servo airServo;
 Adafruit_NeoPixel StatusLed(NEOPIXEL_COUNT, STATUS_LED, NEO_GRB + NEO_KHZ800);
 AS5600 as5600;
 
 // --- SHARED DATA (Thread Safe) ---
-volatile ControlPacket currentData; // Data received from Master
+volatile ControlPacket currentData;
 volatile bool isConnectionActive = false;
 SemaphoreHandle_t dataMutex;
 
@@ -20,7 +21,7 @@ void TaskComms(void *pvParameters);
 void setFailsafe();
 
 // Simple valve switching state (no Hall sensors)
-int currentValveState = 0; // 0=both off, 1=VALVE_A, 2=VALVE_B
+int currentValveState = 0;
 unsigned long lastSwitchTime = 0;
 int hall_start = 0;
 int hall_end = 0;
@@ -29,7 +30,7 @@ unsigned long lastBlinkTime = 0;
 bool directionForward = true;
 bool valveA = LOW;
 bool valveB = LOW;
-int delayAfterSwitch = 0; // ms
+int delayAfterSwitch = 0;
 unsigned long forwardTimer = 0;
 unsigned long reverseTimer = 0;
 unsigned long movementStartTime = 0;
@@ -43,11 +44,11 @@ unsigned long prev_time = 0;
 float angular_speed = 0.0; // degrees per second
 
 bool automaticPrev = false;
-float automaticTargetSpeed = 0.0; // target speed in deg/s for Automatic mode
-int servoPosition = 90;           // default servo position (0-180)
-long currentDelayTarget = 3000;   // delay between valve switch in ms
-int currentGear = 2;              // default gear (neutral)
-int lastServoGear = -1;           // tracks what gear servo is actually set to
+float automaticTargetSpeed = 0.0;
+int servoPosition = SERVO_NEUTRAL_US;
+long currentDelayTarget = DELAY_MAX_MS;
+int currentGear = 2;
+int lastServoGear = -1;
 unsigned long gearShiftTimer = 0;
 bool gearUpCondition = false;
 bool gearDownCondition = false;
@@ -58,7 +59,7 @@ void setup_NeoPixel()
     digitalWrite(STATUS_LED_PWR, HIGH);
     StatusLed.begin();
     StatusLed.clear();
-    StatusLed.setBrightness(50);
+    StatusLed.setBrightness(LED_BRIGHTNESS);
     StatusLed.fill(StatusLed.Color(255, 100, 0));
     StatusLed.show();
 }
@@ -66,34 +67,28 @@ void setup_NeoPixel()
 void setup()
 {
     setup_NeoPixel();
-    Serial.begin(921600); // USB Debug
+    Serial.begin(921600);
 
-    // I2C for AS5600
     Wire.begin(SDA_PIN, SCL_PIN);
     as5600.begin();
 
-    // UART ku Masterovi
     Serial1.begin(921600, SERIAL_8N1, UART_RX, UART_TX);
 
-    // Nastavenie pinov
     pinMode(VALVE_A, OUTPUT);
     pinMode(VALVE_B, OUTPUT);
     digitalWrite(VALVE_A, LOW);
     digitalWrite(VALVE_B, LOW);
-    pinMode(HALL_START, INPUT); // Or INPUT_PULLUP if needed
+    pinMode(HALL_START, INPUT);
     pinMode(HALL_END, INPUT);
-    delay(1000); // Short pause for stabilization
+    delay(1000);
 
-    // Servo setup
     ESP32PWM::allocateTimer(0);
     airServo.setPeriodHertz(333);
     airServo.attach(SERVO_REG, 500, 2500);
-    airServo.write(servoPosition); // Set default position
+    airServo.write(servoPosition);
 
-    // Mutex
     dataMutex = xSemaphoreCreateMutex();
 
-    // Start communication task (Core 0)
     xTaskCreatePinnedToCore(
         TaskComms,
         "Comms",
@@ -101,7 +96,7 @@ void setup()
         NULL,
         1,
         NULL,
-        0 // Runs on core 0
+        0
     );
 
     Serial.println("SLAVE ESP32-S3 Ready");
@@ -109,9 +104,6 @@ void setup()
 
 void loop()
 {
-    // --- MAIN LOOP (CORE 1) - CONTROL ---
-    // This runs fast and manages physical pins
-
     ControlPacket localData;
     bool connectionOK;
 
@@ -136,12 +128,12 @@ void loop()
                 delta_angle -= 4096;
             if (delta_angle < -2048)
                 delta_angle += 4096;
-            angular_speed = (delta_angle * 360.0 / 4096.0) / (delta_t / 1000.0); // degrees per second
+            angular_speed = (delta_angle * 360.0 / 4096.0) / (delta_t / 1000.0);
         }
     }
     prev_angle = current_angle;
     prev_time = current_time;
-    // Print raw angle and speed
+    bool isMoving = abs(angular_speed) > MOVING_SPEED_THRESHOLD;
 
     if (connectionOK)
     {
@@ -152,37 +144,53 @@ void loop()
         {
             if (localData.haltIMU == false)
             {
+                if (localData.brake)
+                {
+                    digitalWrite(VALVE_A, LOW);
+                    digitalWrite(VALVE_B, LOW);
+                    lastSwitchTime = 0;
+                    if (!isMoving && lastServoGear != 1)
+                    {
+                        airServo.writeMicroseconds(SERVO_GEAR1_US);
+                        lastServoGear = 1;
+                        currentGear = 1;
+                    }
+                    StatusLed.fill(StatusLed.Color(255, 255, 0));
+                    StatusLed.show();
+                    delay(10);
+                    return;
+                }
+
                 if (localData.motorEnable)
-                    StatusLed.fill(StatusLed.Color(0, 255, 0));   // Green - motor active
+                    StatusLed.fill(StatusLed.Color(0, 255, 0));
                 else
-                    StatusLed.fill(StatusLed.Color(255, 80, 0));  // Orange - motor disabled, shifting OK
+                    StatusLed.fill(StatusLed.Color(255, 80, 0));
 
                 // --- MODE-SPECIFIC DELAY CALCULATION ---
                 bool motorActive = false;
 
                 if (localData.Automatic == true)
                 {
-                    delayMin = localData.button; // button controls minimum delay in automatic mode
+                    delayMin = localData.button;
 
                     if (!automaticPrev)
                     {
                         automaticPrev = true;
-                        automaticTargetSpeed = (localData.AutomaticSpeed > 0) ? localData.AutomaticSpeed : 2000.0;
-                        currentDelayTarget = delayMin; // start with button value
-                        currentGear = 1;               // start with gear 1 in automatic mode (servo: 900µs)
+                        automaticTargetSpeed = (localData.AutomaticSpeed > 0) ? localData.AutomaticSpeed : AUTO_DEFAULT_SPEED;
+                        currentDelayTarget = delayMin;
+                        currentGear = 1;
                     }
                     else if (localData.AutomaticSpeed != automaticTargetSpeed && localData.AutomaticSpeed > 0)
                     {
                         automaticTargetSpeed = localData.AutomaticSpeed;
                     }
 
-                    // throttle controls speed tolerance from 20 to 500
                     int speedTolerance = map(localData.throttle, 190, 1800, 1, 500);
                     speedTolerance = constrain(speedTolerance, 20, 500);
 
                     float targetLow = automaticTargetSpeed - speedTolerance;
-                    float kp = 0.04;        // proportional gain for delay adjustment
-                    int maxAdjustment = 15; // limit how much delay changes each cycle
+                    float kp = AUTO_KP;
+                    int maxAdjustment = AUTO_MAX_ADJUSTMENT;
 
                     if (angular_speed > automaticTargetSpeed)
                     {
@@ -198,21 +206,20 @@ void loop()
                     }
                     else
                     {
-                        currentDelayTarget += 1; // coast
+                        currentDelayTarget += 1;
                     }
-                    currentDelayTarget = constrain(currentDelayTarget, delayMin, 3000);
+                    currentDelayTarget = constrain(currentDelayTarget, delayMin, DELAY_MAX_MS);
                     motorActive = true;
 
-                    // Automatic gear shifting based on speed with delay
-                    // Gear values: 1=gear1 (900µs), 3=gear2 (2200µs) — 2 is neutral, not used in auto
-                    if (angular_speed >= automaticTargetSpeed * 0.75 && currentGear == 1)
+                    // Automatic gear shifting
+                    if (angular_speed >= GEAR_UP_SPEED && currentGear == 1)
                     {
                         if (!gearUpCondition)
                         {
                             gearUpCondition = true;
                             gearShiftTimer = millis();
                         }
-                        else if (millis() - gearShiftTimer > 1000)
+                        else if (millis() - gearShiftTimer > GEAR_SHIFT_DELAY_MS)
                         {
                             currentGear = 3;
                             gearUpCondition = false;
@@ -223,14 +230,14 @@ void loop()
                         gearUpCondition = false;
                     }
 
-                    if (angular_speed < automaticTargetSpeed * 0.7 && currentGear == 3)
+                    if (angular_speed < GEAR_DOWN_SPEED && currentGear == 3)
                     {
                         if (!gearDownCondition)
                         {
                             gearDownCondition = true;
                             gearShiftTimer = millis();
                         }
-                        else if (millis() - gearShiftTimer > 1000)
+                        else if (millis() - gearShiftTimer > GEAR_SHIFT_DELAY_MS)
                         {
                             currentGear = 1;
                             gearDownCondition = false;
@@ -243,20 +250,21 @@ void loop()
 
                     if (millis() % 100 == 0)
                     {
-                        Serial.printf("Auto target: %.1f, actual: %.1f, delay: %ld, gear: %d\n", automaticTargetSpeed, angular_speed, currentDelayTarget, currentGear);
+                        Serial.printf("Auto target: %.1f, actual: %.1f, delay: %ld, gear: %d\n",
+                                      automaticTargetSpeed, angular_speed, currentDelayTarget, currentGear);
                     }
                 }
                 else
                 {
                     automaticPrev = false;
-                    motorActive = (localData.throttle > 200);
+                    motorActive = (localData.throttle > THROTTLE_DEADZONE);
 
                     if (motorActive)
                     {
-                        currentDelayTarget = map(localData.throttle, 200, 1800, 3000, delayMin);
+                        currentDelayTarget = map(localData.throttle, THROTTLE_DEADZONE, 1800, DELAY_MAX_MS, delayMin);
                         if (currentDelayTarget < delayMin)
                             currentDelayTarget = delayMin;
-                        delayMin = localData.button; // button sets min delay
+                        delayMin = localData.button;
                     }
                 }
 
@@ -268,7 +276,6 @@ void loop()
                     int h_start = analogRead(HALL_START);
                     int h_end = analogRead(HALL_END);
 
-                    // Detect sensor hit and change direction
                     bool justHitSensor = false;
 
                     if (h_start < HALL_THRESHOLD && !directionForward)
@@ -294,18 +301,14 @@ void loop()
 
                     if (timeSinceHit < (unsigned long)currentDelayTarget)
                     {
-                        // PAUSE
                         digitalWrite(VALVE_A, LOW);
                         digitalWrite(VALVE_B, LOW);
                     }
                     else
                     {
-                        // MOVEMENT
                         pistonMoving = true;
                         if (movementStartTime == 0)
-                        {
                             movementStartTime = millis();
-                        }
 
                         if (directionForward)
                         {
@@ -327,12 +330,10 @@ void loop()
                 }
 
                 // --- SERVO GEAR CONTROL ---
-                // Gear change only when piston is moving; always neutral otherwise
                 int targetGear = (localData.Automatic && localData.motorEnable) ? currentGear : localData.Gear;
-                if (!localData.motorEnable)
+                if (!localData.motorEnable && !isMoving)
                 {
-                    // Motor disabled - always shift to neutral
-                    servoPosition = 1500;
+                    servoPosition = SERVO_NEUTRAL_US;
                     airServo.writeMicroseconds(servoPosition);
                     lastServoGear = 2;
                 }
@@ -341,28 +342,20 @@ void loop()
                     if (targetGear != lastServoGear)
                     {
                         if (targetGear == 1)
-                            servoPosition = 1800;
+                            servoPosition = SERVO_GEAR1_US;
                         else if (targetGear == 2)
-                            servoPosition = 1500;
+                            servoPosition = SERVO_NEUTRAL_US;
                         else if (targetGear == 3)
-                            servoPosition = 1200;
+                            servoPosition = SERVO_GEAR3_US;
                         airServo.writeMicroseconds(servoPosition);
                         lastServoGear = targetGear;
                     }
                 }
-                else if (localData.Automatic == false)
-                {
-                    servoPosition = 1500;
-                    airServo.writeMicroseconds(servoPosition);
-                    lastServoGear = 2;
-                }
-                
             }
             else
             {
                 StatusLed.fill(StatusLed.Color(0, 0, 255));
                 StatusLed.show();
-
                 setFailsafe();
             }
         }
@@ -370,47 +363,28 @@ void loop()
         {
             setFailsafe();
             nowBlink = millis();
-            if (nowBlink - lastBlinkTime >= 1000UL)
+            if (nowBlink - lastBlinkTime >= BLINK_INTERVAL_MS)
             {
                 ledBlinkOn = !ledBlinkOn;
                 lastBlinkTime = nowBlink;
             }
-            if (ledBlinkOn)
-            {
-                StatusLed.fill(StatusLed.Color(0, 255, 255));
-            }
-            else
-            {
-                StatusLed.fill(StatusLed.Color(0, 0, 0));
-            }
+            StatusLed.fill(ledBlinkOn ? StatusLed.Color(0, 255, 255) : StatusLed.Color(0, 0, 0));
         }
     }
     else
     {
-        // FAILSAFE MODE
         setFailsafe();
         nowBlink = millis();
-        if (nowBlink - lastBlinkTime >= 1000UL)
+        if (nowBlink - lastBlinkTime >= BLINK_INTERVAL_MS)
         {
             ledBlinkOn = !ledBlinkOn;
             lastBlinkTime = nowBlink;
         }
-        if (ledBlinkOn)
-        {
-            StatusLed.fill(StatusLed.Color(255, 0, 255));
-        }
-        else
-        {
-            StatusLed.fill(StatusLed.Color(0, 0, 0));
-        }
+        StatusLed.fill(ledBlinkOn ? StatusLed.Color(255, 0, 255) : StatusLed.Color(0, 0, 0));
     }
 
     StatusLed.show();
-
-    // Here you can read Hall sensors and send back to Master if needed
-    // bool pistonStart = digitalRead(HALL_START);
-
-    delay(10); // 100Hz refresh rate is enough for valves
+    delay(10);
 }
 
 // --- TASK: COMMUNICATION (CORE 0) ---
@@ -423,7 +397,6 @@ void TaskComms(void *pvParameters)
     {
         if (Serial1.available() >= sizeof(ControlPacket))
         {
-
             if (Serial1.peek() != (PACKET_HEADER & 0xFF))
             {
                 Serial1.read();
@@ -432,11 +405,9 @@ void TaskComms(void *pvParameters)
 
             Serial1.readBytes((char *)&tempPacket, sizeof(ControlPacket));
 
-            // Integrity check (Checksum)
             if (tempPacket.header == PACKET_HEADER &&
                 tempPacket.checksum == calculateChecksum(&tempPacket))
             {
-
                 if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
                 {
                     memcpy((void *)&currentData, &tempPacket, sizeof(ControlPacket));
@@ -447,8 +418,8 @@ void TaskComms(void *pvParameters)
             }
         }
 
-        if (millis() - lastPacketTime > 500)
-        { // 500ms without signal
+        if (millis() - lastPacketTime > CONNECTION_TIMEOUT_MS)
+        {
             if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
             {
                 isConnectionActive = false;

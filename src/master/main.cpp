@@ -13,6 +13,68 @@
 #include "errors.h"
 #include "tilt_detection.h"
 
+// --- KNIGHT RIDER (KITT) SCANNER ANIMATION ---
+// Physical LEDs 0-16: individual. LEDs 17-28 (12 pcs): grouped as one virtual LED.
+// Positions and timing are configured in config.h.
+static int8_t        krPos = 0;
+static int8_t        krDir = 1;
+static unsigned long krLast = 0;
+static uint8_t       krR = 255, krG = 0, krB = 0; // current color — change via setKnightRiderColor()
+
+void setKnightRiderColor(uint8_t r, uint8_t g, uint8_t b) {
+    krR = r; krG = g; krB = b;
+}
+
+static void krSetVirt(int virt, uint8_t r, uint8_t g, uint8_t b) {
+    if (virt < KR_GROUP_START) {
+        pixels.setPixelColor(virt, pixels.Color(r, g, b));
+    } else {
+        for (int p = KR_GROUP_START; p < NEOPIXEL_COUNT; p++)
+            pixels.setPixelColor(p, pixels.Color(r, g, b));
+    }
+}
+
+bool knightRiderStep() {
+    unsigned long now = millis();
+    if (now - krLast < KR_STEP_MS) return false;
+    krLast = now;
+
+    pixels.clear();
+
+    // Fading tail — scales all color channels
+    for (uint8_t t = 1; t <= KR_TAIL; t++) {
+        int tidx = krPos - krDir * (int)t;
+        if (tidx >= 0 && tidx < KR_VIRT_COUNT) {
+            uint8_t scale = 255 - (255 / (KR_TAIL + 1)) * t;
+            krSetVirt(tidx,
+                      (uint8_t)((krR * scale) >> 8),
+                      (uint8_t)((krG * scale) >> 8),
+                      (uint8_t)((krB * scale) >> 8));
+        }
+    }
+    // Full-bright head
+    krSetVirt(krPos, krR, krG, krB);
+
+    krPos += krDir;
+    if (krPos >= KR_VIRT_COUNT) { krPos = KR_VIRT_COUNT - 2; krDir = -1; }
+    if (krPos < 0)              { krPos = 1;                  krDir =  1; }
+
+    return true;
+}
+
+void bootKnightRider(unsigned long durationMs, uint8_t r, uint8_t g, uint8_t b) {
+    setKnightRiderColor(r, g, b); 
+    krPos = 0; krDir = 1; krLast = 0; // reset animation state
+    unsigned long start = millis();
+    while (millis() - start < durationMs) {
+        if (knightRiderStep()) pixels.show();
+        delay(1);
+    }
+    pixels.clear();
+    pixels.show();
+    setKnightRiderColor(255,0,255); // purple
+}
+
 // --- FUNCTION IMPLEMENTATIONS IN MAIN.CPP ---
 
 void beep(int duration_ms, int frequency)
@@ -89,26 +151,29 @@ void setup()
     ESP32PWM::allocateTimer(2);
     ESP32PWM::allocateTimer(3);
     analogReadResolution(12);
+
     setup_NeoPixel();
+    bootKnightRider(BOOT_ANIM_DURATION_MS, 255, 255, 255);
+
     slavePower.init();
+
     Serial.begin(921600); // USB Debug
     Serial1.begin(921600, SERIAL_8N1, INTER_TX_S, INTER_RX_S);
     Serial.println("Starting MASTER setup...");
-    setup_valves();
 
+    setup_valves();
     setup_buzzer();
     beep(200, 1500);
     setup_battery();
     setup_button();
     setup_imu();
     delay(300);
+
     Serial.println("IMU initialized, calibrating...");
     beep(200, 3000);
 
     calibrate_imu();
     Serial.println("IMU calibration complete!");
-
-    Serial.println("CRSF setup starting...");
     setup_CRSF();
     Serial.println("CRSF setup complete!");
     setup_ServoPWM();
@@ -193,7 +258,7 @@ void read_and_display_imu()
 void check_battery()
 {
     unsigned long now = millis();
-    if (now - lastBatteryUpdate < 100)
+    if (now - lastBatteryUpdate < BATTERY_READ_INTERVAL_MS)
     {
         return;
     }
@@ -202,7 +267,7 @@ void check_battery()
     int rawImon = analogRead(IMON_CURRENT);
 
     float voltageImon = (rawImon * ADC_REF_VOLTAGE) / ADC_RESOLUTION;
-    imonCurrent = voltageImon / CONVERSION_FACTOR;
+    imonCurrent = voltageImon / IMON_CONVERSION_FACTOR;
 
     batteryVoltage = (rawADC / (float)ADC_RESOLUTION) * ADC_REF_VOLTAGE * 6.60;
     bool currentlyConnected = batteryVoltage >= BATTERY_DISCONNECTED_THRESHOLD;
@@ -212,7 +277,7 @@ void check_battery()
     bool rapidDrop = (previousBatteryVoltage > 0) && (voltageDrop > BATTERY_DROP_THRESHOLD);
     if (rapidDrop)
     {
-        ignoreLowBatteryUntil = millis() + 5000; // Ignore low battery for 5 seconds after rapid drop
+        ignoreLowBatteryUntil = millis() + BATTERY_LOW_IGNORE_MS;
         Serial.println("RAPID VOLTAGE DROP DETECTED - ignoring low battery for 5s");
     }
     previousBatteryVoltage = batteryVoltage;
@@ -276,7 +341,7 @@ void check_battery()
     if (batteryVoltage < BATTERY_VOLTAGE_CRITICAL && currentlyConnected && !rapidDrop && millis() > ignoreLowBatteryUntil)
     {
         lowBatteryCounter++;
-        if (lowBatteryCounter >= 5) // Require 5 consecutive low readings (about 0.5s)
+        if (lowBatteryCounter >= BATTERY_LOW_CONFIRM_COUNT)
         {
             Serial.printf("CRITICAL BATTERY: %.2fV < %.2fV\n", batteryVoltage, BATTERY_VOLTAGE_CRITICAL);
             signalError(ERR_BATTERY_LOW, true);
@@ -317,7 +382,7 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels)
         const int baseCenter = (SERVO_ATTACH_MIN + SERVO_ATTACH_MAX) / 2;
         mappedSteer = baseSteer + (SERVO_CENTER - baseCenter);
         mappedSteer = constrain(mappedSteer, SERVO_ATTACH_MIN, SERVO_ATTACH_MAX);
-        // Serial.printf("Base Steer: %d | Mapped Steer: %d\n", baseSteer, mappedSteer);
+        //Serial.printf("raw Steer: %d Base Steer: %d | Mapped Steer: %d\n",rawSteer, baseSteer, mappedSteer);
         steering.writeMicroseconds(mappedSteer);
 
         currentThrottlePWM = rcChannels->value[2];
@@ -357,6 +422,13 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels)
         }else{
             disableIMU = false;
             
+        }
+        if (rcChannels->value[8] < 1000){  // break button
+            brakeActive = false;
+            servo_break.writeMicroseconds(BRAKE_SERVO_CENTER_US);
+        }else{
+            brakeActive = true;
+            servo_break.writeMicroseconds(BRAKE_SERVO_PRESSED_US);
         }
         
         
@@ -401,9 +473,7 @@ void TaskSlaveComms(void *pvParameters)
     static unsigned long lastBeepTime = 0;
     static bool beepActive = false;
     static unsigned long beepStartTime = 0;
-    const unsigned long BEEP_DURATION = 150;  // ms
-    const unsigned long BEEP_INTERVAL = 1000; // ms
-    
+
     // Battery check timing
     static unsigned long lastBatteryCheckTime = 0;
 
@@ -416,9 +486,8 @@ void TaskSlaveComms(void *pvParameters)
         {
             static unsigned long lastErrorBlink = 0;
             static bool errorLedOn = true;
-            const unsigned long ERROR_BLINK_INTERVAL = 500;
 
-            if ((now - lastErrorBlink) >= ERROR_BLINK_INTERVAL)
+            if ((now - lastErrorBlink) >= ERROR_BLINK_INTERVAL_MS)
             {
                 errorLedOn = !errorLedOn;
                 lastErrorBlink = now;
@@ -435,43 +504,92 @@ void TaskSlaveComms(void *pvParameters)
         }
         else if (isFailsafeActive)
         {
-            pixels.fill(pixels.Color(255, 0, 255)); // Purple - Failsafe
+            knightRiderStep(); // KITT scanner — pixels.show() called below
         }
         else if (haltIMU)
         {
             pixels.fill(pixels.Color(255, 0, 0)); // Red - IMU halt
         }
-        else if (!disableIMU)
+        else if (Automatic)
         {
-            static unsigned long lastBluePulse = 0;
-            const unsigned long BLUE_PULSE_INTERVAL = 1000;
-            const unsigned long BLUE_PULSE_DURATION = 100;
+            if (slavePower.isMotorEnabled())
+            {
+                static unsigned long lastAutoPulse = 0;
+                uint32_t pulseColor = !disableIMU
+                    ? pixels.Color(128, 0, 128)
+                    : pixels.Color(255, 200, 0);
 
-            if ((now - lastBluePulse) >= BLUE_PULSE_INTERVAL)
-            {
-                pixels.fill(pixels.Color(0, 0, 255)); // Blue - IMU active
-                lastBluePulse = now;
-            }
-            else if ((now - lastBluePulse) >= BLUE_PULSE_DURATION)
-            {
-                pixels.fill(pixels.Color(0, 255, 0)); // Back to green
+                if ((now - lastAutoPulse) >= AUTO_PULSE_INTERVAL_MS)
+                {
+                    pixels.fill(pulseColor);
+                    lastAutoPulse = now;
+                }
+                else if ((now - lastAutoPulse) >= AUTO_PULSE_DURATION_MS)
+                {
+                    pixels.fill(pixels.Color(0, 255, 0));
+                }
+                else
+                {
+                    pixels.fill(pulseColor);
+                }
             }
             else
             {
-                pixels.fill(pixels.Color(0, 0, 255)); // Blue during pulse
+                pixels.fill(pixels.Color(0, 255, 0)); // Green - motor stopped
+            }
+        }
+        else if (!disableIMU)
+        {
+            if (slavePower.isMotorEnabled())
+            {
+                static unsigned long lastBluePulse = 0;
+
+                if ((now - lastBluePulse) >= BLUE_PULSE_INTERVAL_MS)
+                {
+                    pixels.fill(pixels.Color(0, 0, 255));
+                    lastBluePulse = now;
+                }
+                else if ((now - lastBluePulse) >= BLUE_PULSE_DURATION_MS)
+                {
+                    pixels.fill(pixels.Color(0, 255, 0)); // Back to green
+                }
+                else
+                {
+                    pixels.fill(pixels.Color(0, 0, 255)); // Blue during pulse
+                }
+            }
+            else
+            {
+                pixels.fill(pixels.Color(0, 255, 0)); // Green - motor stopped
             }
         }
         else
         {
             pixels.fill(pixels.Color(0, 255, 0)); // Green - OK
         }
+        // Airplane strobe overlay when motor is disabled (not in error/failsafe/halt)
+        if (!slavePower.isMotorEnabled() && !isFailsafeActive && !errorActive && !haltIMU)
+        {
+            static unsigned long strobeBase = 0;
+            if (strobeBase == 0) strobeBase = now;
+            unsigned long phase = (now - strobeBase) % STROBE_PERIOD_MS;
+            // Two quick flashes: 0-60ms and 120-180ms
+            if (phase < 60 || (phase >= 120 && phase < 180))
+                pixels.fill(pixels.Color(255, 255, 255));
+        }
+
+        // Brake light overlay — always last, so it overrides everything on the rear LEDs
+        if (brakeActive)
+        {
+            for (int i = BRAKE_LIGHT_START; i < NEOPIXEL_COUNT; i++)
+                pixels.setPixelColor(i, pixels.Color(255, 0, 0));
+        }
+
         pixels.show();
 
         // --- NON-BLOCKING BEEP MACHINE ---
 
         static uint8_t beepCountLeft = 0;
-        const unsigned long HALT_BEEP_DURATION = 150;
-        const unsigned long HALT_BEEP_INTERVAL = 1000;
 
         if (beepRequestPending && !beepActive && beepCountLeft == 0)
         {
@@ -488,18 +606,18 @@ void TaskSlaveComms(void *pvParameters)
             ledcWrite(0, 180);
         }
 
-        if (haltIMU && !beepActive && beepCountLeft == 0 && (now - lastBeepTime) >= HALT_BEEP_INTERVAL)
+        if (haltIMU && !beepActive && beepCountLeft == 0 && (now - lastBeepTime) >= HALT_BEEP_INTERVAL_MS)
         {
             beepActive = true;
             beepStartTime = now;
             lastBeepTime = now;
-            ledcSetup(0, 1500, 8);
+            ledcSetup(0, HALT_BEEP_FREQUENCY, 8);
             ledcWrite(0, 180);
         }
 
         if (beepActive)
         {
-            unsigned long activeDuration = (beepRequestType == BEEP_NONE) ? HALT_BEEP_DURATION : beepRequestDuration;
+            unsigned long activeDuration = (beepRequestType == BEEP_NONE) ? HALT_BEEP_DURATION_MS : beepRequestDuration;
             if ((now - beepStartTime) >= activeDuration)
             {
                 ledcWrite(0, 0);
@@ -515,8 +633,7 @@ void TaskSlaveComms(void *pvParameters)
             }
         }
 
-        // --- BATTERY CHECK (every 500ms) ---
-        if (now - lastBatteryCheckTime > 500)
+        if (now - lastBatteryCheckTime > BATTERY_CHECK_TASK_INTERVAL_MS)
         {
             check_battery();
             lastBatteryCheckTime = now;
@@ -527,6 +644,7 @@ void TaskSlaveComms(void *pvParameters)
         packetToSend.elrsActive = isLinkUp;
         packetToSend.button = button;
         packetToSend.haltIMU = haltIMU;
+        packetToSend.brake = brakeActive;
         packetToSend.Automatic = Automatic;
         packetToSend.AutomaticSpeed = AutomaticSpeed;
         packetToSend.Gear = gearSwitch;
@@ -536,6 +654,6 @@ void TaskSlaveComms(void *pvParameters)
         Serial1.write((uint8_t *)&packetToSend, sizeof(ControlPacket));
 
         // Obnovovacia frekvencia pre Slave (napr. 50Hz = 20ms) - NON-BLOCKING!
-        vTaskDelay(20 / portTICK_PERIOD_MS);
+        vTaskDelay(SLAVE_COMMS_LOOP_MS / portTICK_PERIOD_MS);
     }
 }
