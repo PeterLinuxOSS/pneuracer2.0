@@ -149,12 +149,6 @@ void loop()
                     digitalWrite(VALVE_A, LOW);
                     digitalWrite(VALVE_B, LOW);
                     lastSwitchTime = 0;
-                    if (!isMoving && lastServoGear != 1)
-                    {
-                        airServo.writeMicroseconds(SERVO_GEAR1_US);
-                        lastServoGear = 1;
-                        currentGear = 1;
-                    }
                     StatusLed.fill(StatusLed.Color(255, 255, 0));
                     StatusLed.show();
                     delay(10);
