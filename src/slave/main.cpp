@@ -3,7 +3,7 @@
 #include <Adafruit_NeoPixel.h>
 #include <Wire.h>
 #include <AS5600.h>
-#include "shared/SharedData.h" // Your shared structure
+#include "shared/SharedData.h"
 #include "pins.h"
 #include "config.h"
 
@@ -16,29 +16,17 @@ volatile ControlPacket currentData;
 volatile bool isConnectionActive = false;
 SemaphoreHandle_t dataMutex;
 
-// --- PROTOTYPY ---
+// --- PROTOTYPES ---
 void TaskComms(void *pvParameters);
 void setFailsafe();
+void updateServo(int targetGear, bool motorEnabled, bool isMoving, bool pistonMoving);
 
-// Simple valve switching state (no Hall sensors)
-int currentValveState = 0;
 unsigned long lastSwitchTime = 0;
-int hall_start = 0;
-int hall_end = 0;
 bool ledBlinkOn = false;
 unsigned long lastBlinkTime = 0;
 bool directionForward = true;
-bool valveA = LOW;
-bool valveB = LOW;
-int delayAfterSwitch = 0;
-unsigned long forwardTimer = 0;
-unsigned long reverseTimer = 0;
-unsigned long movementStartTime = 0;
-int counter = 0;
-unsigned long nowBlink = 0;
 int delayMin = 0;
 
-// AS5600 variables
 uint16_t prev_angle = 0;
 unsigned long prev_time = 0;
 float angular_speed = 0.0; // degrees per second
@@ -53,11 +41,7 @@ int lastServoGear = -1;
 unsigned long gearShiftTimer = 0;
 bool gearUpCondition = false;
 bool gearDownCondition = false;
-
-// Gear shift optimization variables
-// float lastAngularSpeed = 0.0;
-// unsigned long lastSpeedCheckTime = 0;
-// int speedStagnationCounter = 0;
+unsigned long lastStatusLogTime = 0;
 
 void setup_NeoPixel()
 {
@@ -109,17 +93,17 @@ void setup()
 
 void loop()
 {
-    ControlPacket localData;
-    bool connectionOK;
+    ControlPacket localData = {};
+    bool connectionOK = false;
 
     if (xSemaphoreTake(dataMutex, (TickType_t)5) == pdTRUE)
     {
-        localData = *(const ControlPacket *)&currentData;
+        memcpy(&localData, (const void *)&currentData, sizeof(ControlPacket));
         connectionOK = isConnectionActive;
         xSemaphoreGive(dataMutex);
     }
 
-    // Read AS5600 raw angle
+    // Read AS5600 raw angle and compute angular speed.
     uint16_t current_angle = as5600.rawAngle();
     unsigned long current_time = millis();
     if (prev_time != 0)
@@ -128,79 +112,168 @@ void loop()
         if (delta_t > 0)
         {
             int16_t delta_angle = current_angle - prev_angle;
-            // Handle wrap around (12-bit, 0-4095)
             if (delta_angle > 2048)
                 delta_angle -= 4096;
-            if (delta_angle < -2048)
+            else if (delta_angle < -2048)
                 delta_angle += 4096;
-            angular_speed = (delta_angle * 360.0 / 4096.0) / (delta_t / 1000.0);
+            angular_speed = (delta_angle * 360.0f / 4096.0f) / (delta_t / 1000.0f);
         }
     }
     prev_angle = current_angle;
     prev_time = current_time;
     bool isMoving = abs(angular_speed) > MOVING_SPEED_THRESHOLD;
 
+    uint8_t targetR = 0;
+    uint8_t targetG = 0;
+    uint8_t targetB = 0;
+    bool pistonMoving = false;
+    bool motorActive = false;
+    int targetGear = localData.Gear;
+
     if (connectionOK)
     {
-        int val1 = analogRead(HALL_START);
-        int val2 = analogRead(HALL_END);
-
-        if (localData.elrsActive)
+        if (!localData.elrsActive)
         {
-            if (localData.haltIMU == false)
+            setFailsafe();
+            unsigned long now = millis();
+            if (now - lastBlinkTime >= BLINK_INTERVAL_MS)
             {
-                if (localData.brake)
+                ledBlinkOn = !ledBlinkOn;
+                lastBlinkTime = now;
+            }
+            if (ledBlinkOn)
+            {
+                targetR = 0;
+                targetG = 255;
+                targetB = 255;
+            }
+        }
+        else if (localData.haltIMU)
+        {
+            setFailsafe();
+            targetR = 0;
+            targetG = 0;
+            targetB = 255;
+        }
+        else if (localData.brake)
+        {
+            setFailsafe();
+            targetR = 255;
+            targetG = 255;
+            targetB = 0;
+        }
+        else
+        {
+            targetR = localData.motorEnable ? 0 : 255;
+            targetG = localData.motorEnable ? 255 : 80;
+            targetB = 0;
+
+            if (localData.Automatic)
+            {
+                delayMin = localData.button;
+                if (!automaticPrev)
                 {
-                    digitalWrite(VALVE_A, LOW);
-                    digitalWrite(VALVE_B, LOW);
-                    lastSwitchTime = 0;
-                    StatusLed.fill(StatusLed.Color(255, 255, 0));
-                    StatusLed.show();
-                    delay(10);
-                    return;
+                    automaticPrev = true;
+                    automaticTargetSpeed = (localData.AutomaticSpeed > 0) ? localData.AutomaticSpeed : AUTO_DEFAULT_SPEED;
+                    currentDelayTarget = delayMin;
+                    currentGear = 1;
+                }
+                else if (localData.AutomaticSpeed > 0 && localData.AutomaticSpeed != automaticTargetSpeed)
+                {
+                    automaticTargetSpeed = localData.AutomaticSpeed;
                 }
 
-                if (localData.motorEnable)
-                    StatusLed.fill(StatusLed.Color(0, 255, 0));
+                int speedTolerance = constrain(map(localData.throttle, 190, 1800, 1, 500), 20, 500);
+                float targetLow = automaticTargetSpeed - speedTolerance;
+                int maxAdjustment = AUTO_MAX_ADJUSTMENT;
+
+                if (angular_speed > automaticTargetSpeed)
+                {
+                    int adjustment = constrain((int)((angular_speed - automaticTargetSpeed) * AUTO_KP), 1, maxAdjustment);
+                    currentDelayTarget += adjustment;
+                }
+                else if (angular_speed < targetLow)
+                {
+                    int adjustment = constrain((int)((targetLow - angular_speed) * AUTO_KP), 1, maxAdjustment);
+                    currentDelayTarget -= adjustment;
+                }
                 else
-                    StatusLed.fill(StatusLed.Color(255, 80, 0));
+                {
+                    currentDelayTarget += 1;
+                }
+                currentDelayTarget = constrain(currentDelayTarget, delayMin, DELAY_MAX_MS);
+                motorActive = true;
+                targetGear = currentGear;
 
-                // --- MODE-SPECIFIC DELAY CALCULATION ---
-                bool motorActive = false;
+                float gearUpThresh = min(automaticTargetSpeed * GEAR_UP_RATIO, GEAR_UP_SPEED);
+                if (angular_speed >= gearUpThresh && currentGear == 1)
+                {
+                    if (!gearUpCondition)
+                    {
+                        gearUpCondition = true;
+                        gearShiftTimer = millis();
+                    }
+                    else if (millis() - gearShiftTimer > GEAR_SHIFT_DELAY_MS)
+                    {
+                        currentGear = 3;
+                        gearUpCondition = false;
+                    }
+                }
+                else
+                {
+                    gearUpCondition = false;
+                }
 
-                if (localData.Automatic == true)
+                float gearDownThresh = max(automaticTargetSpeed * GEAR_DOWN_RATIO, GEAR_DOWN_SPEED);
+                if (angular_speed < gearDownThresh && currentGear == 3)
+                {
+                    if (!gearDownCondition)
+                    {
+                        gearDownCondition = true;
+                        gearShiftTimer = millis();
+                    }
+                    else if (millis() - gearShiftTimer > GEAR_SHIFT_DELAY_MS)
+                    {
+                        currentGear = 1;
+                        gearDownCondition = false;
+                    }
+                }
+                else
+                {
+                    gearDownCondition = false;
+                }
+
+                if (millis() - lastStatusLogTime >= 100)
+                {
+                    lastStatusLogTime = millis();
+                    Serial.printf("Auto target: %.1f, actual: %.1f, delay: %ld, gear: %d, up@%.0f, dn@%.0f\n",
+                                  automaticTargetSpeed, angular_speed, currentDelayTarget, currentGear,
+                                  gearUpThresh, gearDownThresh);
+                }
+            }
+            else
+            {
+                automaticPrev = false;
+                motorActive = (localData.throttle > THROTTLE_DEADZONE);
+                if (motorActive)
                 {
                     delayMin = localData.button;
-
-                    if (!automaticPrev)
+                    float manualTargetSpeed = constrain((float)map(localData.throttle, THROTTLE_DEADZONE, 1800, 500, 3000), 500.0f, 3000.0f);
+                    if (!manualMotorPrev)
                     {
-                        automaticPrev = true;
-                        automaticTargetSpeed = (localData.AutomaticSpeed > 0) ? localData.AutomaticSpeed : AUTO_DEFAULT_SPEED;
-                        currentDelayTarget = delayMin;
-                        currentGear = 1;
+                        manualMotorPrev = true;
+                        currentDelayTarget = DELAY_MAX_MS;
                     }
-                    else if (localData.AutomaticSpeed != automaticTargetSpeed && localData.AutomaticSpeed > 0)
+                    int speedTolerance = constrain(map(localData.throttle, THROTTLE_DEADZONE, 1800, 1, 500), 20, 500);
+                    float targetLow = manualTargetSpeed - speedTolerance;
+                    if (angular_speed > manualTargetSpeed)
                     {
-                        automaticTargetSpeed = localData.AutomaticSpeed;
-                    }
-
-                    int speedTolerance = map(localData.throttle, 190, 1800, 1, 500);
-                    speedTolerance = constrain(speedTolerance, 20, 500);
-
-                    float targetLow = automaticTargetSpeed - speedTolerance;
-                    float kp = AUTO_KP;
-                    int maxAdjustment = AUTO_MAX_ADJUSTMENT;
-
-                    if (angular_speed > automaticTargetSpeed)
-                    {
-                        int adjustment = (int)((angular_speed - automaticTargetSpeed) * kp);
-                        adjustment = constrain(adjustment, 1, maxAdjustment);
+                        int adjustment = constrain((int)((angular_speed - manualTargetSpeed) * AUTO_KP), 1, AUTO_MAX_ADJUSTMENT);
                         currentDelayTarget += adjustment;
                     }
                     else if (angular_speed < targetLow)
                     {
-                        int adjustment = (int)((targetLow - angular_speed) * kp);
-                        adjustment = constrain(adjustment, 1, maxAdjustment);
+                        int adjustment = constrain((int)((targetLow - angular_speed) * AUTO_KP), 1, AUTO_MAX_ADJUSTMENT);
                         currentDelayTarget -= adjustment;
                     }
                     else
@@ -208,222 +281,84 @@ void loop()
                         currentDelayTarget += 1;
                     }
                     currentDelayTarget = constrain(currentDelayTarget, delayMin, DELAY_MAX_MS);
-                    motorActive = true;
-
-                    // Automatic gear shifting with capped dynamic thresholds
-
-                    // --- GEAR UP (1 → 3) ---
-                    // Use dynamic ratio but cap at GEAR_UP_SPEED to prevent waiting for unreachable speeds
-                    float gearUpThresh = min(automaticTargetSpeed * GEAR_UP_RATIO, GEAR_UP_SPEED);
-
-                    if (angular_speed >= gearUpThresh && currentGear == 1)
-                    {
-                        if (!gearUpCondition)
-                        {
-                            gearUpCondition = true;
-                            gearShiftTimer = millis();
-                        }
-                        else if (millis() - gearShiftTimer > GEAR_SHIFT_DELAY_MS)
-                        {
-                            currentGear = 3;
-                            gearUpCondition = false;
-                        }
-                    }
-                    else
-                    {
-                        gearUpCondition = false;
-                    }
-
-                    // --- GEAR DOWN (3 → 1) ---
-                    // Use dynamic ratio but cap at GEAR_DOWN_SPEED to prevent rapid toggling
-                    float gearDownThresh = max(automaticTargetSpeed * GEAR_DOWN_RATIO, GEAR_DOWN_SPEED);
-
-                    if (angular_speed < gearDownThresh && currentGear == 3)
-                    {
-                        if (!gearDownCondition)
-                        {
-                            gearDownCondition = true;
-                            gearShiftTimer = millis();
-                        }
-                        else if (millis() - gearShiftTimer > GEAR_SHIFT_DELAY_MS)
-                        {
-                            currentGear = 1;
-                            gearDownCondition = false;
-                        }
-                    }
-                    else
-                    {
-                        gearDownCondition = false;
-                    }
-
-                    if (millis() % 100 == 0)
-                    {
-                        Serial.printf("Auto target: %.1f, actual: %.1f, delay: %ld, gear: %d, up@%.0f, dn@%.0f\n",
-                                      automaticTargetSpeed, angular_speed, currentDelayTarget, currentGear,
-                                      gearUpThresh, gearDownThresh);
-                    }
                 }
                 else
                 {
-                    automaticPrev = false;
-                    motorActive = (localData.throttle > THROTTLE_DEADZONE);
+                    manualMotorPrev = false;
+                }
+            }
 
-                    if (motorActive)
-                    {
-                        delayMin = localData.button;
+            if (motorActive && localData.motorEnable)
+            {
+                int h_start = analogRead(HALL_START);
+                int h_end = analogRead(HALL_END);
+                bool justHitSensor = false;
 
-                        float manualTargetSpeed = (float)map(localData.throttle, THROTTLE_DEADZONE, 1800, 500, 3000);
-                        manualTargetSpeed = constrain(manualTargetSpeed, 500.0f, 3000.0f);
-
-                        if (!manualMotorPrev)
-                        {
-                            manualMotorPrev = true;
-                            currentDelayTarget = DELAY_MAX_MS;
-                        }
-
-                        int speedTolerance = map(localData.throttle, THROTTLE_DEADZONE, 1800, 1, 500);
-                        speedTolerance = constrain(speedTolerance, 20, 500);
-                        float targetLow = manualTargetSpeed - speedTolerance;
-
-                        if (angular_speed > manualTargetSpeed)
-                        {
-                            int adjustment = (int)((angular_speed - manualTargetSpeed) * AUTO_KP);
-                            adjustment = constrain(adjustment, 1, AUTO_MAX_ADJUSTMENT);
-                            currentDelayTarget += adjustment;
-                        }
-                        else if (angular_speed < targetLow)
-                        {
-                            int adjustment = (int)((targetLow - angular_speed) * AUTO_KP);
-                            adjustment = constrain(adjustment, 1, AUTO_MAX_ADJUSTMENT);
-                            currentDelayTarget -= adjustment;
-                        }
-                        else
-                        {
-                            currentDelayTarget += 1;
-                        }
-                        currentDelayTarget = constrain(currentDelayTarget, delayMin, DELAY_MAX_MS);
-                    }
-                    else
-                    {
-                        manualMotorPrev = false;
-                    }
+                if (h_start < HALL_THRESHOLD && !directionForward)
+                {
+                    directionForward = true;
+                    justHitSensor = true;
+                }
+                else if (h_end < HALL_THRESHOLD && directionForward)
+                {
+                    directionForward = false;
+                    justHitSensor = true;
                 }
 
-                // --- SHARED VALVE CONTROL LOGIC ---
-                bool pistonMoving = false;
-
-                if (motorActive && localData.motorEnable)
+                if (justHitSensor)
                 {
-                    int h_start = analogRead(HALL_START);
-                    int h_end = analogRead(HALL_END);
+                    lastSwitchTime = millis();
+                }
 
-                    bool justHitSensor = false;
-
-                    if (h_start < HALL_THRESHOLD && !directionForward)
+                unsigned long timeSinceHit = millis() - lastSwitchTime;
+                if (timeSinceHit < (unsigned long)currentDelayTarget)
+                {
+                    digitalWrite(VALVE_A, LOW);
+                    digitalWrite(VALVE_B, LOW);
+                }
+                else
+                {
+                    pistonMoving = true;
+                    if (directionForward)
                     {
-                        directionForward = true;
-                        justHitSensor = true;
-                        counter++;
-                    }
-                    else if (h_end < HALL_THRESHOLD && directionForward)
-                    {
-                        directionForward = false;
-                        justHitSensor = true;
-                        counter++;
-                    }
-
-                    if (justHitSensor)
-                    {
-                        lastSwitchTime = millis();
-                        movementStartTime = 0;
-                    }
-
-                    unsigned long timeSinceHit = millis() - lastSwitchTime;
-
-                    if (timeSinceHit < (unsigned long)currentDelayTarget)
-                    {
-                        digitalWrite(VALVE_A, LOW);
+                        digitalWrite(VALVE_A, HIGH);
                         digitalWrite(VALVE_B, LOW);
                     }
                     else
                     {
-                        pistonMoving = true;
-                        if (movementStartTime == 0)
-                            movementStartTime = millis();
-
-                        if (directionForward)
-                        {
-                            digitalWrite(VALVE_A, HIGH);
-                            digitalWrite(VALVE_B, LOW);
-                        }
-                        else
-                        {
-                            digitalWrite(VALVE_A, LOW);
-                            digitalWrite(VALVE_B, HIGH);
-                        }
-                    }
-                }
-                else
-                {
-                    lastSwitchTime = 0;
-                    digitalWrite(VALVE_A, LOW);
-                    digitalWrite(VALVE_B, LOW);
-                }
-
-                // --- SERVO GEAR CONTROL ---
-                int targetGear = (localData.Automatic && localData.motorEnable) ? currentGear : localData.Gear;
-                if (!localData.motorEnable && !isMoving)
-                {
-                    servoPosition = SERVO_NEUTRAL_US;
-                    airServo.writeMicroseconds(servoPosition);
-                    lastServoGear = 2;
-                }
-                else if (pistonMoving)
-                {
-                    if (targetGear != lastServoGear)
-                    {
-                        if (targetGear == 1)
-                            servoPosition = SERVO_GEAR1_US;
-                        else if (targetGear == 2)
-                            servoPosition = SERVO_NEUTRAL_US;
-                        else if (targetGear == 3)
-                            servoPosition = SERVO_GEAR3_US;
-                        airServo.writeMicroseconds(servoPosition);
-                        lastServoGear = targetGear;
+                        digitalWrite(VALVE_A, LOW);
+                        digitalWrite(VALVE_B, HIGH);
                     }
                 }
             }
             else
             {
-                StatusLed.fill(StatusLed.Color(0, 0, 255));
-                StatusLed.show();
-                setFailsafe();
+                lastSwitchTime = 0;
+                digitalWrite(VALVE_A, LOW);
+                digitalWrite(VALVE_B, LOW);
             }
-        }
-        else
-        {
-            setFailsafe();
-            nowBlink = millis();
-            if (nowBlink - lastBlinkTime >= BLINK_INTERVAL_MS)
-            {
-                ledBlinkOn = !ledBlinkOn;
-                lastBlinkTime = nowBlink;
-            }
-            StatusLed.fill(ledBlinkOn ? StatusLed.Color(0, 255, 255) : StatusLed.Color(0, 0, 0));
+
+            updateServo(targetGear, localData.motorEnable, isMoving, pistonMoving);
         }
     }
     else
     {
         setFailsafe();
-        nowBlink = millis();
-        if (nowBlink - lastBlinkTime >= BLINK_INTERVAL_MS)
+        unsigned long now = millis();
+        if (now - lastBlinkTime >= BLINK_INTERVAL_MS)
         {
             ledBlinkOn = !ledBlinkOn;
-            lastBlinkTime = nowBlink;
+            lastBlinkTime = now;
         }
-        StatusLed.fill(ledBlinkOn ? StatusLed.Color(255, 0, 255) : StatusLed.Color(0, 0, 0));
+        if (ledBlinkOn)
+        {
+            targetR = 255;
+            targetG = 0;
+            targetB = 255;
+        }
     }
 
+    StatusLed.fill(StatusLed.Color(targetR, targetG, targetB));
     StatusLed.show();
     delay(10);
 }
@@ -476,5 +411,41 @@ void setFailsafe()
 {
     digitalWrite(VALVE_A, LOW);
     digitalWrite(VALVE_B, LOW);
-    StatusLed.show();
+}
+
+void updateServo(int targetGear, bool motorEnabled, bool isMoving, bool pistonMoving)
+{
+    if (!motorEnabled && !isMoving)
+    {
+        servoPosition = SERVO_NEUTRAL_US;
+        airServo.writeMicroseconds(servoPosition);
+        lastServoGear = 2;
+        return;
+    }
+
+    if (!pistonMoving)
+    {
+        return;
+    }
+
+    if (targetGear == lastServoGear)
+    {
+        return;
+    }
+
+    if (targetGear == 1)
+    {
+        servoPosition = SERVO_GEAR1_US;
+    }
+    else if (targetGear == 3)
+    {
+        servoPosition = SERVO_GEAR3_US;
+    }
+    else
+    {
+        servoPosition = SERVO_NEUTRAL_US;
+    }
+
+    airServo.writeMicroseconds(servoPosition);
+    lastServoGear = targetGear;
 }
