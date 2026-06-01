@@ -44,6 +44,7 @@ unsigned long prev_time = 0;
 float angular_speed = 0.0; // degrees per second
 
 bool automaticPrev = false;
+bool manualMotorPrev = false;
 float automaticTargetSpeed = 0.0;
 int servoPosition = SERVO_NEUTRAL_US;
 long currentDelayTarget = DELAY_MAX_MS;
@@ -52,6 +53,11 @@ int lastServoGear = -1;
 unsigned long gearShiftTimer = 0;
 bool gearUpCondition = false;
 bool gearDownCondition = false;
+
+// Gear shift optimization variables
+// float lastAngularSpeed = 0.0;
+// unsigned long lastSpeedCheckTime = 0;
+// int speedStagnationCounter = 0;
 
 void setup_NeoPixel()
 {
@@ -96,8 +102,7 @@ void setup()
         NULL,
         1,
         NULL,
-        0
-    );
+        0);
 
     Serial.println("SLAVE ESP32-S3 Ready");
 }
@@ -205,8 +210,13 @@ void loop()
                     currentDelayTarget = constrain(currentDelayTarget, delayMin, DELAY_MAX_MS);
                     motorActive = true;
 
-                    // Automatic gear shifting
-                    if (angular_speed >= GEAR_UP_SPEED && currentGear == 1)
+                    // Automatic gear shifting with capped dynamic thresholds
+
+                    // --- GEAR UP (1 → 3) ---
+                    // Use dynamic ratio but cap at GEAR_UP_SPEED to prevent waiting for unreachable speeds
+                    float gearUpThresh = min(automaticTargetSpeed * GEAR_UP_RATIO, GEAR_UP_SPEED);
+
+                    if (angular_speed >= gearUpThresh && currentGear == 1)
                     {
                         if (!gearUpCondition)
                         {
@@ -224,7 +234,11 @@ void loop()
                         gearUpCondition = false;
                     }
 
-                    if (angular_speed < GEAR_DOWN_SPEED && currentGear == 3)
+                    // --- GEAR DOWN (3 → 1) ---
+                    // Use dynamic ratio but cap at GEAR_DOWN_SPEED to prevent rapid toggling
+                    float gearDownThresh = max(automaticTargetSpeed * GEAR_DOWN_RATIO, GEAR_DOWN_SPEED);
+
+                    if (angular_speed < gearDownThresh && currentGear == 3)
                     {
                         if (!gearDownCondition)
                         {
@@ -244,8 +258,9 @@ void loop()
 
                     if (millis() % 100 == 0)
                     {
-                        Serial.printf("Auto target: %.1f, actual: %.1f, delay: %ld, gear: %d\n",
-                                      automaticTargetSpeed, angular_speed, currentDelayTarget, currentGear);
+                        Serial.printf("Auto target: %.1f, actual: %.1f, delay: %ld, gear: %d, up@%.0f, dn@%.0f\n",
+                                      automaticTargetSpeed, angular_speed, currentDelayTarget, currentGear,
+                                      gearUpThresh, gearDownThresh);
                     }
                 }
                 else
@@ -255,10 +270,42 @@ void loop()
 
                     if (motorActive)
                     {
-                        currentDelayTarget = map(localData.throttle, THROTTLE_DEADZONE, 1800, DELAY_MAX_MS, delayMin);
-                        if (currentDelayTarget < delayMin)
-                            currentDelayTarget = delayMin;
                         delayMin = localData.button;
+
+                        float manualTargetSpeed = (float)map(localData.throttle, THROTTLE_DEADZONE, 1800, 500, 3000);
+                        manualTargetSpeed = constrain(manualTargetSpeed, 500.0f, 3000.0f);
+
+                        if (!manualMotorPrev)
+                        {
+                            manualMotorPrev = true;
+                            currentDelayTarget = DELAY_MAX_MS;
+                        }
+
+                        int speedTolerance = map(localData.throttle, THROTTLE_DEADZONE, 1800, 1, 500);
+                        speedTolerance = constrain(speedTolerance, 20, 500);
+                        float targetLow = manualTargetSpeed - speedTolerance;
+
+                        if (angular_speed > manualTargetSpeed)
+                        {
+                            int adjustment = (int)((angular_speed - manualTargetSpeed) * AUTO_KP);
+                            adjustment = constrain(adjustment, 1, AUTO_MAX_ADJUSTMENT);
+                            currentDelayTarget += adjustment;
+                        }
+                        else if (angular_speed < targetLow)
+                        {
+                            int adjustment = (int)((targetLow - angular_speed) * AUTO_KP);
+                            adjustment = constrain(adjustment, 1, AUTO_MAX_ADJUSTMENT);
+                            currentDelayTarget -= adjustment;
+                        }
+                        else
+                        {
+                            currentDelayTarget += 1;
+                        }
+                        currentDelayTarget = constrain(currentDelayTarget, delayMin, DELAY_MAX_MS);
+                    }
+                    else
+                    {
+                        manualMotorPrev = false;
                     }
                 }
 

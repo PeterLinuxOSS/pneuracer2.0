@@ -13,7 +13,7 @@
 #define THROTTLE_DEADZONE        200      // throttle value below which motor is inactive
 
 // --- SERVO (µs) ---
-#define SERVO_GEAR1_US           1800     // gear 1 position
+#define SERVO_GEAR1_US           1800     // gear 1 position,lubim ta
 #define SERVO_NEUTRAL_US         1450     // neutral position
 #define SERVO_GEAR3_US           1200     // gear 3 (highest) position
 
@@ -21,8 +21,10 @@
 #define AUTO_DEFAULT_SPEED       2000.0f  // fallback target speed when none received (deg/s)
 #define AUTO_KP                  0.04f    // proportional gain for delay controller
 #define AUTO_MAX_ADJUSTMENT      15       // max delay change per cycle (ms)
+#define GEAR_UP_RATIO    0.85f   // upshift keď speed >= AS × 0.92
+#define GEAR_DOWN_RATIO  0.65f   // downshift keď speed < AS × 0.77
 #define GEAR_UP_SPEED            1600.0f  // upshift to gear 3 when speed >= this (deg/s)
-#define GEAR_DOWN_SPEED          1400.0f   // downshift to gear 1 when speed < this (deg/s)
+#define GEAR_DOWN_SPEED          1300.0f   // downshift to gear 1 when speed < this (deg/s)
 #define GEAR_SHIFT_DELAY_MS      250     // hysteresis time before gear change (ms)
 
 // --- COMMUNICATION ---

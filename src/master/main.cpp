@@ -448,7 +448,7 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels)
         // ch[3] stick → servo microseconds 1200–1800, posielané priamo na slave
         gearServoRaw = (int16_t)constrain(map(rcChannels->value[3], 172, 1811, 1200, 1800), 1200, 1800);
         
-        AutomaticSpeed = map(rcChannels->value[9], 191, 1811, 1500, 3000);
+        AutomaticSpeed = map(rcChannels->value[9], 191, 1811, 1000, 3000);
 
         crsf->telemetryWriteBaroAltitude(AutomaticSpeed, 0);
         if (!disableIMU)
