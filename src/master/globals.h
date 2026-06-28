@@ -30,6 +30,8 @@ extern volatile bool button7;
 extern volatile int16_t button;
 extern volatile bool Automatic;
 extern volatile bool brakeActive;
+extern volatile bool launchControl;
+extern volatile bool lcStagingActive;
 extern volatile int16_t AutomaticSpeed;
 // --- SHARED VARIABLES (COMMUNICATION) ---
 extern volatile bool isFailsafeActive;
@@ -42,7 +44,6 @@ extern volatile float imonCurrent;
 
 // --- TIMING ---
 extern uint32_t timeNow;
-extern unsigned long lastBatteryUpdate;
 
 // --- SERVO MAPPING ---
 extern uint8_t batteryPercent;
@@ -85,6 +86,15 @@ extern volatile bool disableIMU;
 extern uint8_t lowBatteryCounter;
 extern float previousBatteryVoltage;
 extern unsigned long ignoreLowBatteryUntil;
+
+// --- CROSS-CORE SYNCHRONIZATION ---
+extern portMUX_TYPE sharedMux;
+
+// --- LED DIRTY FLAG ---
+extern volatile bool ledsNeedUpdate;
+
+// --- STROBE TRANSITION TRACKING ---
+extern volatile bool motorWasEnabled;
 
 #endif // GLOBALS_H
 

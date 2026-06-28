@@ -13,9 +13,6 @@ void beep(int duration_ms, int frequency = 2000);
 void calibrate_imu();
 void read_and_display_imu();
 
-/// Control valve
-void gear_change(bool value = false);
-
 /// CRSF callback for RC channels
 void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels);
 

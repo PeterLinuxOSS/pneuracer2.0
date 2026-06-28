@@ -87,21 +87,18 @@ void beep(int duration_ms, int frequency)
 
 void requestBeepPattern(uint8_t type, uint8_t count, uint16_t frequency, uint16_t duration_ms, uint16_t gap_ms)
 {
-    if (beepRequestPending)
-    {
-        // Existing beep has priority if it is an error tone.
-        if (beepRequestType == BEEP_ERROR)
-        {
-            return;
-        }
+    portENTER_CRITICAL(&sharedMux);
+    if (beepRequestPending && beepRequestType == BEEP_ERROR) {
+        portEXIT_CRITICAL(&sharedMux);
+        return;
     }
-
     beepRequestType = (BeepPatternType)type;
     beepRequestCount = count;
     beepRequestFrequency = frequency;
     beepRequestDuration = duration_ms;
     beepRequestGap = gap_ms;
     beepRequestPending = true;
+    portEXIT_CRITICAL(&sharedMux);
 }
 
 void calibrate_imu()
@@ -165,6 +162,7 @@ void setup()
     setup_buzzer();
     beep(200, 1500);
     setup_battery();
+    setup_imon();
     setup_button();
     setup_imu();
     delay(300);
@@ -193,20 +191,6 @@ void setup()
     Serial.println("MASTER Setup Complete. Running Multithreaded.");
 }
 
-void gear_change(bool value) //unused
-{
-    if (value)
-    {
-        digitalWrite(VAL1_A, HIGH);
-        digitalWrite(VAL1_B, LOW);
-    }
-    else
-    {
-        digitalWrite(VAL1_A, LOW);
-        digitalWrite(VAL1_B, HIGH);
-    }
-}
-
 // --- IMU SENSOR READING ---
 void read_and_display_imu()
 {
@@ -223,14 +207,15 @@ void read_and_display_imu()
     float corrected_ay = accel.acceleration.y - accelYoffset;
     float corrected_az = accel.acceleration.z - accelZoffset;
 
+    unsigned long imuNow = millis();
+
     // --- DEBUG: Show raw values ---
     static unsigned long lastDebugTime = 0;
-    if (millis() - lastDebugTime > 500)
-    { // Every 500ms
+    if (imuNow - lastDebugTime > 500) {
         Serial.printf("[DEBUG] Gyro: X=%.2f Y=%.2f Z=%.2f | Accel: X=%.2f Y=%.2f Z=%.2f\n",
                       corrected_gx, corrected_gy, corrected_gz,
                       corrected_ax, corrected_ay, corrected_az);
-        lastDebugTime = millis();
+        lastDebugTime = imuNow;
     }
 
     // --- DETECT ABNORMAL TILT (COMPLEMENTARY FILTER: GYRO + ACCEL) ---
@@ -239,29 +224,65 @@ void read_and_display_imu()
 
     // --- DEBUG: Always show tilt angles ---
     static unsigned long lastTiltTime = 0;
-    if (millis() - lastTiltTime > 500)
-    { // Every 500ms
+    if (imuNow - lastTiltTime > 500) {
         Serial.printf("[TILT] Roll: %.1f° | Pitch: %.1f° | Threshold: %.1f°\n",
                       tilt.roll, tilt.pitch, TILT_WARNING_THRESHOLD);
-        lastTiltTime = millis();
+        lastTiltTime = imuNow;
     }
+
+    static unsigned long haltClearStart = 0;
+    float maxTilt = max(abs(tilt.roll), abs(tilt.pitch));
+    const float TILT_RECOVERY_THRESHOLD = TILT_WARNING_THRESHOLD - 5.0f;
 
     if (tilt.isAbnormal)
     {
         haltIMU = true; // Set flag - TaskSlaveComms will handle beeping
+        haltClearStart = 0;
         Serial.printf("  🚨 Roll: %.1f° | Pitch: %.1f° %s\n",
                       tilt.roll, tilt.pitch, tilt.isCritical ? "[CRITICAL]" : "[WARNING]");
+    }
+    else if (haltIMU)
+    {
+        if (maxTilt < TILT_RECOVERY_THRESHOLD)
+        {
+            if (haltClearStart == 0)
+            {
+                haltClearStart = millis();
+            }
+            else if (millis() - haltClearStart >= 2000)
+            {
+                haltIMU = false;
+                haltClearStart = 0;
+                Serial.println("  ✅ Tilt returned to normal, clearing haltIMU");
+            }
+        }
+        else
+        {
+            haltClearStart = 0;
+        }
     }
 }
 
 
+static uint8_t batteryVoltageToPercent(float v) {
+    // 3S LiPo discharge curve (non-linear approximation)
+    static const float voltages[] = {9.0f, 9.6f, 10.2f, 10.8f, 11.1f, 11.4f, 11.7f, 12.0f, 12.3f, 12.6f};
+    static const uint8_t percents[] = {0, 5, 15, 30, 50, 65, 78, 88, 95, 100};
+    const int n = sizeof(voltages) / sizeof(voltages[0]);
+    if (v <= voltages[0]) return 0;
+    if (v >= voltages[n - 1]) return 100;
+    for (int i = 1; i < n; i++) {
+        if (v <= voltages[i]) {
+            float t = (v - voltages[i - 1]) / (voltages[i] - voltages[i - 1]);
+            return (uint8_t)(percents[i - 1] + t * (percents[i] - percents[i - 1]));
+        }
+    }
+    return 100;
+}
+
 void check_battery()
 {
     unsigned long now = millis();
-    if (now - lastBatteryUpdate < BATTERY_READ_INTERVAL_MS)
-    {
-        return;
-    }
 
     int rawADC = analogRead(VBAT_REF);
     int rawImon = analogRead(IMON_CURRENT);
@@ -269,7 +290,7 @@ void check_battery()
     float voltageImon = (rawImon * ADC_REF_VOLTAGE) / ADC_RESOLUTION;
     imonCurrent = voltageImon / IMON_CONVERSION_FACTOR;
 
-    batteryVoltage = (rawADC / (float)ADC_RESOLUTION) * ADC_REF_VOLTAGE * 6.60;
+    batteryVoltage = (rawADC / (float)ADC_RESOLUTION) * ADC_REF_VOLTAGE * VBAT_DIVIDER_RATIO;
     bool currentlyConnected = batteryVoltage >= BATTERY_DISCONNECTED_THRESHOLD;
 
     // Check for rapid voltage drop (indicates battery disconnection)
@@ -301,10 +322,9 @@ void check_battery()
             haltIMU = false;
         }
 
-        lastBatteryUpdate = now;
         if (crsf)
         {
-            crsf->telemetryWriteBattery(BATTERY_VOLTAGE_MAX, 0, 0, batteryPercent);
+            crsf->telemetryWriteBattery(BATTERY_VOLTAGE_MAX, 0, (uint32_t)(AutomaticSpeed / 100), batteryPercent);
         }
         return;
     }
@@ -317,25 +337,11 @@ void check_battery()
         usbPower = false;
     }
 
-    if (batteryVoltage <= BATTERY_VOLTAGE_MIN)
-    {
-        batteryPercent = 0;
-    }
-    else if (batteryVoltage >= BATTERY_VOLTAGE_MAX)
-    {
-        batteryPercent = 100;
-    }
-    else
-    {
-        batteryPercent = (uint8_t)(((batteryVoltage - BATTERY_VOLTAGE_MIN) /
-                                    (BATTERY_VOLTAGE_MAX - BATTERY_VOLTAGE_MIN)) * 100.0);
-    }
-
-    lastBatteryUpdate = now;
+    batteryPercent = batteryVoltageToPercent(batteryVoltage);
 
     if (crsf)
     {
-        crsf->telemetryWriteBattery(batteryVoltage, 0, 0, batteryPercent);
+        crsf->telemetryWriteBattery(batteryVoltage, 0, (uint32_t)(AutomaticSpeed / 100), batteryPercent);
     }
 
     if (batteryVoltage < BATTERY_VOLTAGE_CRITICAL && currentlyConnected && !rapidDrop && millis() > ignoreLowBatteryUntil)
@@ -387,6 +393,7 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels)
 
         currentThrottlePWM = rcChannels->value[2];
         Automatic = rcChannels->value[4] > 1000;
+        launchControl = rcChannels->value[11] > 1000;
         //
         isLinkUp = true;
         button7 = rcChannels->value[7] > 1000;
@@ -418,16 +425,55 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels)
         {
             disableIMU  = true;
             haltIMU = false;
-            
+
         }else{
             disableIMU = false;
-            
+
         }
-        if (rcChannels->value[8] < 1000){  // break button
+        static bool lcStagingReady = false;
+        static bool lcLaunchPhase = false;
+        static unsigned long lcLaunchTimer = 0;
+        if (rcChannels->value[8] < 1000) {
             brakeActive = false;
+            lcStagingReady = false;
+            lcStagingActive = false;
+            lcLaunchPhase = false;
+            lcLaunchTimer = 0;
             servo_break.writeMicroseconds(BRAKE_SERVO_CENTER_US);
-        }else{
+        } else if (!launchControl || Automatic) {
             brakeActive = true;
+            lcStagingReady = false;
+            lcStagingActive = false;
+            lcLaunchPhase = false;
+            lcLaunchTimer = 0;
+            servo_break.writeMicroseconds(BRAKE_SERVO_PRESSED_US);
+        } else if (!slavePower.isMotorEnabled() && gearSwitch == 1 && button == 0) {
+            // LC staging: brake held, motor off, gear 1, button at minimum
+            brakeActive = true;
+            lcStagingReady = true;
+            lcStagingActive = true;
+            lcLaunchPhase = false;
+            lcLaunchTimer = 0;
+            servo_break.writeMicroseconds(BRAKE_SERVO_PRESSED_US);
+        } else if (lcStagingReady) {
+            // LC launch: motor enabled after staging — hold brake 1s then release
+            if (!lcLaunchPhase) {
+                lcLaunchPhase = true;
+                lcLaunchTimer = millis();
+            }
+            lcStagingActive = false;
+            brakeActive = false;
+            if (millis() - lcLaunchTimer < LAUNCH_CONTROL_BRAKE_HOLD_MS) {
+                servo_break.writeMicroseconds(BRAKE_SERVO_PRESSED_US);
+            } else {
+                servo_break.writeMicroseconds(BRAKE_SERVO_CENTER_US);
+            }
+        } else {
+            // motor was already on when brake was pressed — normal brake
+            brakeActive = true;
+            lcStagingActive = false;
+            lcLaunchPhase = false;
+            lcLaunchTimer = 0;
             servo_break.writeMicroseconds(BRAKE_SERVO_PRESSED_US);
         }
         
@@ -445,12 +491,11 @@ void onReceiveRcChannels(serialReceiverLayer::rcChannels_t *rcChannels)
             gearSwitch = 3;
         }
 
-        // ch[3] stick → servo microseconds 1200–1800, posielané priamo na slave
+        
         gearServoRaw = (int16_t)constrain(map(rcChannels->value[3], 172, 1811, 1200, 1800), 1200, 1800);
         
-        AutomaticSpeed = map(rcChannels->value[9], 191, 1811, 1000, 3000);
+        AutomaticSpeed = map(rcChannels->value[9], 191, 1811, AUTOMATIC_MIN_SPEED, AUTOMATIC_MAX_SPEED);
 
-        crsf->telemetryWriteBaroAltitude(AutomaticSpeed, 0);
         if (!disableIMU)
         {
             read_and_display_imu();
@@ -482,6 +527,8 @@ void TaskSlaveComms(void *pvParameters)
         unsigned long now = millis();
 
         // --- LED COLOR ---
+        static unsigned long lastLedShow = 0;
+
         if (errorActive)
         {
             static unsigned long lastErrorBlink = 0;
@@ -491,24 +538,29 @@ void TaskSlaveComms(void *pvParameters)
             {
                 errorLedOn = !errorLedOn;
                 lastErrorBlink = now;
+                ledsNeedUpdate = true;
             }
 
             if (errorLedOn)
-            {
-                pixels.fill(pixels.Color(255, 0, 0)); // Red - Error
-            }
+                pixels.fill(pixels.Color(255, 0, 0));
             else
-            {
                 pixels.clear();
-            }
         }
         else if (isFailsafeActive)
         {
-            knightRiderStep(); // KITT scanner — pixels.show() called below
+            if (knightRiderStep()) ledsNeedUpdate = true;
         }
         else if (haltIMU)
         {
-            pixels.fill(pixels.Color(255, 0, 0)); // Red - IMU halt
+            pixels.fill(pixels.Color(255, 0, 0));
+            ledsNeedUpdate = true;
+        }
+        else if (lcStagingActive)
+        {
+            // LC staging: front LEDs magenta, brake overlay keeps rear LEDs red
+            for (int i = 0; i < BRAKE_LIGHT_START; i++)
+                pixels.setPixelColor(i, pixels.Color(255, 0, 128));
+            ledsNeedUpdate = true;
         }
         else if (Automatic)
         {
@@ -523,10 +575,12 @@ void TaskSlaveComms(void *pvParameters)
                 {
                     pixels.fill(pulseColor);
                     lastAutoPulse = now;
+                    ledsNeedUpdate = true;
                 }
                 else if ((now - lastAutoPulse) >= AUTO_PULSE_DURATION_MS)
                 {
                     pixels.fill(pixels.Color(0, 255, 0));
+                    ledsNeedUpdate = true;
                 }
                 else
                 {
@@ -535,7 +589,8 @@ void TaskSlaveComms(void *pvParameters)
             }
             else
             {
-                pixels.fill(pixels.Color(0, 255, 0)); // Green - motor stopped
+                pixels.fill(pixels.Color(0, 255, 0));
+                ledsNeedUpdate = true;
             }
         }
         else if (!disableIMU)
@@ -548,53 +603,71 @@ void TaskSlaveComms(void *pvParameters)
                 {
                     pixels.fill(pixels.Color(0, 0, 255));
                     lastBluePulse = now;
+                    ledsNeedUpdate = true;
                 }
                 else if ((now - lastBluePulse) >= BLUE_PULSE_DURATION_MS)
                 {
-                    pixels.fill(pixels.Color(0, 255, 0)); // Back to green
+                    pixels.fill(pixels.Color(0, 255, 0));
+                    ledsNeedUpdate = true;
                 }
                 else
                 {
-                    pixels.fill(pixels.Color(0, 0, 255)); // Blue during pulse
+                    pixels.fill(pixels.Color(0, 0, 255));
                 }
             }
             else
             {
-                pixels.fill(pixels.Color(0, 255, 0)); // Green - motor stopped
+                pixels.fill(pixels.Color(0, 255, 0));
+                ledsNeedUpdate = true;
             }
         }
         else
         {
-            pixels.fill(pixels.Color(0, 255, 0)); // Green - OK
+            pixels.fill(pixels.Color(0, 255, 0));
+            ledsNeedUpdate = true;
         }
-        // Airplane strobe overlay when motor is disabled (not in error/failsafe/halt)
-        if (!slavePower.isMotorEnabled() && !isFailsafeActive && !errorActive && !haltIMU)
+
+        // Airplane strobe overlay — uses absolute time to stay phase-consistent
+        bool motorNowEnabled = slavePower.isMotorEnabled();
+        if (!motorNowEnabled && !isFailsafeActive && !errorActive && !haltIMU)
         {
-            static unsigned long strobeBase = 0;
-            if (strobeBase == 0) strobeBase = now;
-            unsigned long phase = (now - strobeBase) % STROBE_PERIOD_MS;
-            // Two quick flashes: 0-60ms and 120-180ms
+            unsigned long phase = now % STROBE_PERIOD_MS;
             if (phase < 60 || (phase >= 120 && phase < 180))
+            {
                 pixels.fill(pixels.Color(255, 255, 255));
+                ledsNeedUpdate = true;
+            }
         }
+        motorWasEnabled = motorNowEnabled;
 
         // Brake light overlay — always last, so it overrides everything on the rear LEDs
         if (brakeActive)
         {
             for (int i = BRAKE_LIGHT_START; i < NEOPIXEL_COUNT; i++)
                 pixels.setPixelColor(i, pixels.Color(255, 0, 0));
+            ledsNeedUpdate = true;
         }
 
-        pixels.show();
+        if (ledsNeedUpdate && (now - lastLedShow) >= 33)
+        {
+            pixels.show();
+            ledsNeedUpdate = false;
+            lastLedShow = now;
+        }
 
         // --- NON-BLOCKING BEEP MACHINE ---
 
         static uint8_t beepCountLeft = 0;
 
-        if (beepRequestPending && !beepActive && beepCountLeft == 0)
+        if (!beepActive && beepCountLeft == 0)
         {
-            beepCountLeft = beepRequestCount;
-            beepRequestPending = false;
+            portENTER_CRITICAL(&sharedMux);
+            bool pending = beepRequestPending;
+            uint8_t cnt = beepRequestCount;
+            if (pending) beepRequestPending = false;
+            portEXIT_CRITICAL(&sharedMux);
+
+            if (pending) beepCountLeft = cnt;
         }
 
         if (beepCountLeft > 0 && !beepActive && (now - lastBeepTime) >= beepRequestGap)
@@ -648,6 +721,7 @@ void TaskSlaveComms(void *pvParameters)
         packetToSend.Automatic = Automatic;
         packetToSend.AutomaticSpeed = AutomaticSpeed;
         packetToSend.Gear = gearSwitch;
+        packetToSend.launchControl = lcStagingActive;
         packetToSend.motorEnable = slavePower.isMotorEnabled();
 
         packetToSend.checksum = calculateChecksum(&packetToSend);

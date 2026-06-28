@@ -26,6 +26,8 @@ volatile bool button7 = false;
 volatile int16_t button = 0;
 volatile bool Automatic = false;
 volatile bool brakeActive = false;
+volatile bool launchControl = false;
+volatile bool lcStagingActive = false;
 volatile int16_t AutomaticSpeed;
 
 // --- SHARED VARIABLES (COMMUNICATION) - DEF ---
@@ -52,7 +54,6 @@ volatile uint16_t beepRequestGap = 0;
 
 // --- TIMING - DEF ---
 uint32_t timeNow = 0;
-unsigned long lastBatteryUpdate = 0;
 unsigned long lastAlertTime = 0;
 
 // --- STATE APP - DEF ---
@@ -71,3 +72,12 @@ float accelXoffset = 0, accelYoffset = 0, accelZoffset = 0;
 uint8_t lowBatteryCounter = 0;
 float previousBatteryVoltage = 0.0;
 unsigned long ignoreLowBatteryUntil = 0;
+
+// --- CROSS-CORE SYNCHRONIZATION ---
+portMUX_TYPE sharedMux = portMUX_INITIALIZER_UNLOCKED;
+
+// --- LED DIRTY FLAG ---
+volatile bool ledsNeedUpdate = true;
+
+// --- STROBE TRANSITION TRACKING ---
+volatile bool motorWasEnabled = false;

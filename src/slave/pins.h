@@ -16,3 +16,5 @@
 #define STATUS_LED_PWR 33
 #define NEOPIXEL_COUNT 1   
 #define HALL_THRESHOLD 2000 // Threshold value for Hall sensor
+
+

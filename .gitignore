@@ -1,8 +1,37 @@
+# PlatformIO build cache & artifacts
 .pio
+.pioenvs
+.piolibdeps
+*.elf
+*.bin
+*.hex
+*.map
+*.o
+*.a
+
+# VS Code (keep shared config, ignore machine/build-specific files)
 .vscode/.browse.c_cpp.db*
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+.vscode/.cortex-debug.*
+.vscode/extensions.json
+
+# OS-generated files
 .ini
 desktop.ini
 **/desktop.ini
+.DS_Store
+**/.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# EdgeTX runtime-generated content (not needed in the repo)
+edgetx_sdcard/LOGS/
+edgetx_sdcard/SCREENSHOTS/
+
+# Editor / temp files
+*.swp
+*~
+*.bak
+*.tmp

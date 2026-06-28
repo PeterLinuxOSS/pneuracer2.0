@@ -17,7 +17,8 @@ struct __attribute__((packed)) ControlPacket {
     bool Automatic;
     int16_t AutomaticSpeed;
     int16_t Gear;
-    uint8_t checksum;   
+    bool launchControl;
+    uint8_t checksum;
 
     
 };

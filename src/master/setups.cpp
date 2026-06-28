@@ -37,7 +37,7 @@ void setup_CRSF() {
         if (!isLinkUp) return;
         isLinkUp = false;
         Serial.println("[CRSF] Link is DOWN");
-        beep(100, 200);
+        requestBeepPattern(BEEP_ERROR, 1, 200, 100, 0);
     });
 
     
@@ -115,8 +115,8 @@ void setup_imu() {
     
     delay(200);  
     
-    uint8_t imuAddress = 0x6A;  // Default address
-    
+    imuAddress = 0x6A;  // Default address (sets the global)
+
     Serial.printf("Attempting to find LSM6DSOTR at address 0x%02X...\n", imuAddress);
     
     Wire.beginTransmission(imuAddress);
@@ -130,9 +130,9 @@ void setup_imu() {
         signalError(ERR_I2C_INIT, true);
         return;
     }
-    delay(100);  
+    delay(100);
     lsm6ds.begin_I2C(imuAddress, &Wire);
-    
+
     Serial.println("✓ LSM6DSOTR initialized successfully!");
     
     // Configure accelerometer range (±2G, ±4G, ±8G, ±16G)

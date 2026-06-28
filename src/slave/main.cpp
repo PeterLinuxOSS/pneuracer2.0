@@ -155,7 +155,7 @@ void loop()
             targetG = 0;
             targetB = 255;
         }
-        else if (localData.brake)
+        else if (localData.brake && !localData.launchControl)
         {
             setFailsafe();
             targetR = 255;
@@ -224,7 +224,7 @@ void loop()
                     gearUpCondition = false;
                 }
 
-                float gearDownThresh = max(automaticTargetSpeed * GEAR_DOWN_RATIO, GEAR_DOWN_SPEED);
+                float gearDownThresh = min(automaticTargetSpeed * GEAR_DOWN_RATIO, GEAR_DOWN_SPEED);
                 if (angular_speed < gearDownThresh && currentGear == 3)
                 {
                     if (!gearDownCondition)
@@ -253,12 +253,19 @@ void loop()
             }
             else
             {
+
                 automaticPrev = false;
                 motorActive = (localData.throttle > THROTTLE_DEADZONE);
                 if (motorActive)
                 {
                     delayMin = localData.button;
-                    float manualTargetSpeed = constrain((float)map(localData.throttle, THROTTLE_DEADZONE, 1800, 500, 3000), 500.0f, 3000.0f);
+                    float manualTargetSpeed = constrain((float)map(localData.throttle, THROTTLE_DEADZONE, 1800, MANUAL_MIN_SPEED, MANUAL_MAX_SPEED), (float)MANUAL_MIN_SPEED, (float)MANUAL_MAX_SPEED);
+                    if (millis() - lastStatusLogTime >= 100)
+                    {
+                        lastStatusLogTime = millis();
+                        Serial.printf("Manual target: %.1f, actual: %.1f, delay: %ld, gear: %d\n",
+                                      manualTargetSpeed, angular_speed, currentDelayTarget, currentGear);
+                    }
                     if (!manualMotorPrev)
                     {
                         manualMotorPrev = true;
@@ -336,9 +343,26 @@ void loop()
                 lastSwitchTime = 0;
                 digitalWrite(VALVE_A, LOW);
                 digitalWrite(VALVE_B, LOW);
+                if (localData.brake && localData.launchControl && !localData.motorEnable) {
+                    int h_start = analogRead(HALL_START);
+                    if (h_start > HALL_THRESHOLD) {
+                        digitalWrite(VALVE_B, HIGH);
+                    } else {
+                        directionForward = true;
+                    }
+                }
             }
 
-            updateServo(targetGear, localData.motorEnable, isMoving, pistonMoving);
+            if (localData.brake && localData.launchControl) {
+                // LC staging: force gear 1 regardless of piston/movement state
+                if (lastServoGear != 1) {
+                    servoPosition = SERVO_GEAR1_US;
+                    airServo.writeMicroseconds(servoPosition);
+                    lastServoGear = 1;
+                }
+            } else {
+                updateServo(targetGear, localData.motorEnable, isMoving, pistonMoving);
+            }
         }
     }
     else

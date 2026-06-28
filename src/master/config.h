@@ -8,7 +8,7 @@
 // --- BATTERY ---
 #define BATTERY_VOLTAGE_MIN             9.0f    // minimum cell voltage for 3S (V)
 #define BATTERY_VOLTAGE_MAX             12.6f   // full charge for 3S (V)
-#define BATTERY_VOLTAGE_CRITICAL        9.0f    // trigger low-battery error below this (V)
+#define BATTERY_VOLTAGE_CRITICAL        9.6f    // trigger low-battery error below this (V) — must be > MIN
 #define BATTERY_DISCONNECTED_THRESHOLD  1.0f    // below this = battery unplugged (V)
 #define BATTERY_DROP_THRESHOLD          2.0f    // rapid drop that indicates disconnection (V)
 #define BATTERY_LOW_CONFIRM_COUNT       5       // consecutive low readings before error fires
@@ -20,6 +20,7 @@
 #define ADC_REF_VOLTAGE                 3.3f    // ESP32 ADC reference voltage
 #define ADC_RESOLUTION                  4095    // 12-bit ADC range
 #define IMON_CONVERSION_FACTOR          0.62f   // current sense: 10µA/A × 62kΩ
+#define VBAT_DIVIDER_RATIO              6.60f   // resistor divider ratio on VBAT_REF pin
 
 // --- STEERING SERVO ---
 #define SERVO_ATTACH_MIN                600     // min PWM (µs)
@@ -28,7 +29,10 @@
 
 // --- BRAKE SERVO ---
 #define BRAKE_SERVO_CENTER_US           1500    // brake released (µs)
-#define BRAKE_SERVO_PRESSED_US          1000    // brake fully engaged (µs)
+#define BRAKE_SERVO_PRESSED_US          700    // brake fully engaged (µs)
+
+// --- LAUNCH CONTROL ---
+#define LAUNCH_CONTROL_BRAKE_HOLD_MS    1000    // hold brake after motor enable before auto-release (ms)
 
 // --- TILT DETECTION ---
 #define TILT_WARNING_THRESHOLD          30.0f   // warning tilt angle (degrees)
@@ -60,5 +64,10 @@
 
 // --- TASK TIMING ---
 #define SLAVE_COMMS_LOOP_MS             20      // TaskSlaveComms loop period (~50 Hz)
+
+
+#define AUTOMATIC_MAX_SPEED             6000
+#define AUTOMATIC_MIN_SPEED             1000
+#define LAUNCH_CONTROL                  true
 
 #endif // MASTER_CONFIG_H
