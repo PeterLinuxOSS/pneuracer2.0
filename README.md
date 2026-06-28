@@ -1,11 +1,23 @@
 🏎️ Pneuracer 2.0 — Control system firmware for a pneumatic vehicle
-> **SOČ project (Stredoškolská odborná činnosť — Secondary School Professional Activity)**  
-> Team **FLUJD** | SPŠ Poprad, Slovak Republic  
-> Author: Peter Rigo | 📧 rigopeter11@gmail.com 
+
+![Pneuracer 2.0](docs/img/pneuracer.jpg)
+
+> Student engineering project by team **FLUJD** — SPŠ techniky a dizajnu, Poprad, Slovak Republic  
+> A functional prototype of a vehicle powered by **compressed air** — no fuel, no electric motors.  
+> Team: Peter Rigo (team lead — electronics, firmware, control system), Matej Mikita, Tomáš Frankovský, Tobias Cehula  
+> 📧 rigopeter11@gmail.com · 📷 Instagram [@flujdsk](https://instagram.com/flujdsk)
 ---
 📋 About the project
-Pneuracer 2.0 is firmware for a pneumatically powered model race car, developed as part of SOČ (Secondary School Professional Activity). The system uses a dual-microcontroller architecture of two ESP32-S3 chips that communicate over UART and together control the drivetrain, steering, tilt detection and vehicle diagnostics.
-The project is built on PlatformIO and compiles two independent firmware images from a single repository.
+Pneuracer 2.0 is the control-system firmware for a pneumatically powered model race car. Every part, circuit and line of the control program was designed and built by the team. The system uses a dual-microcontroller architecture of two ESP32-S3 chips that communicate over UART and together control the drivetrain, steering, tilt detection and vehicle diagnostics.
+The project is built on PlatformIO and compiles two independent firmware images from a single repository. It was developed for — and competed in — several engineering competitions (ENERSOL SK, SOČ, Strojár Inovátor, the international Pneuracer competition), not a single event.
+---
+🏆 Achievements (2025/2026 school year)
+- 🥇 **Absolute winners** of the regional round of **ENERSOL SK** — best project of the whole round
+- 🥈 **2nd place** at the national round of **ENERSOL SK** — advanced to the international final
+- 🌍 Awarded at the **international ENERSOL** round in Senica (competing against V4 countries + Austria)
+- 🥈 **2nd place** at **Strojár Inovátor**, Technical University of Košice
+- 4️⃣ **4th place** at the national round of **SOČ**
+- 4️⃣ **4th place** out of 40 teams at the **international Pneuracer competition in Brno** — six places better than the previous year
 ---
 🏗️ System architecture
 ```
@@ -207,12 +219,16 @@ Datasheets of the main components used in the project:
 - **WS2812B** addressable LED — <https://www.sdiplight.com/what-is-ws2812b-led-and-how-to-use-ws2812b-led/>
 - **LiPo batteries** (RC Factory) — <https://www.rc-factory.eu/lipo-baterie>
 
-Tools & background reading used during development are kept with the SOČ project documentation.
+Tools & background reading used during development are kept with the project documentation.
 ---
 👤 Authors
-SPŠ Poprad, Slovakia
-Peter Rigo — electronics, firmware, control system
-📧 rigopeter11@gmail.com
+Team **FLUJD** — SPŠ techniky a dizajnu, Poprad, Slovakia
+- **Peter Rigo** — team lead, electronics, firmware, control system · 📧 rigopeter11@gmail.com
+- **Matej Mikita**
+- **Tomáš Frankovský**
+- **Tobias Cehula**
+
+📷 Instagram [@flujdsk](https://instagram.com/flujdsk)
 ---
 📄 License
-This project was created for SOČ purposes. The code is shared for educational use.
+This project was created by team FLUJD for several student engineering competitions (ENERSOL SK, SOČ, Strojár Inovátor, Pneuracer). The code is shared for educational use.
