@@ -162,8 +162,9 @@ All tunable values live in `config.h` — no "magic numbers" in the code.
 ```
 ---
 🧩 3D model (`Model/`)
-The `Model/` folder contains the 3D CAD model of the car exported from **Onshape**:
+The `Model/` folder contains the 3D CAD model of the car exported from **Onshape**: 
 - `Assembly 1.step` — the full vehicle assembly in the neutral **STEP** format (ISO 10303), so it can be opened in any CAD package (Fusion 360, SolidWorks, FreeCAD, Onshape, …) for further editing, fitment checks or manufacturing.
+-  <https://cad.onshape.com/documents/b738f9fed58a0fc4300e86a8/w/2e6fb48d5bbfbd61ad92da93/e/82aa846a4fa390a4291205c2?renderMode=0&uiState=6a414e6d9a392f71b3d31cf3>
 ---
 🎮 Transmitter — EdgeTX SD card (`edgetx_sdcard/`)
 The `edgetx_sdcard/` folder holds the ready-to-use **EdgeTX** SD card content for the RadioMaster transmitter that controls the car over ELRS/CRSF.
