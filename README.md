@@ -49,7 +49,14 @@ pneuracer2.0/
 │       └── pins.h              # Slave pin map (SCH_MAIN_3)
 ├── Model/                      # 3D CAD model of the car (Onshape export)
 │   └── Assembly 1.step         # Full assembly — STEP format
+├── docs/
+│   ├── BOM.md                  # Bill of materials (electronics + pneumatic kit)
+│   ├── schematics/             # Electrical schematics (drawio + PNG + DXF/TIF)
+│   └── hardware/               # EasyEDA Pro PCB projects + manufacturing files
+│       ├── main-board/         # Main board "Flujd" (ESP32-S3 control electronics)
+│       └── switching-regulator/ # Step-down regulator (2× on the main board)
 ├── edgetx_sdcard/              # EdgeTX SD card content for the RadioMaster transmitter
+├── TODO.md                     # Roadmap / known issues for the next PCB revision
 └── .pio/                       # PlatformIO build cache (do not commit)
 ```
 ---
@@ -70,6 +77,18 @@ Brake servo	Master	Pin 35
 Buzzer	Master	Pin 38, 1500 Hz
 Battery ADC	Master	Pin 15, 3S LiPo (9–12.6 V)
 Current ADC	Master	Pin 12
+
+A full **Bill of Materials** (control electronics + the SMC pneumatic kit) is in [`docs/BOM.md`](docs/BOM.md).
+---
+📐 Schematics
+The electrical schematics live in [`docs/schematics/`](docs/schematics/):
+- `schema.drawio` — main signal schematic (editable in [draw.io](https://app.diagrams.net))
+- `schema_power.drawio` + `schema_power.drawio.png` — power distribution (battery → eFuse → regulators)
+- `schema.dxf` / `schema.tif` — exported schematic for CAD / printing
+
+The **EasyEDA Pro PCB projects** (main board + switching regulator) and their manufacturing files (Gerber, BOM, pick-and-place, interactive BOM) are in [`docs/hardware/`](docs/hardware/).
+
+![Power schematic](docs/schematics/schema_power.drawio.png)
 ---
 🔌 Master ↔ Slave communication protocol
 The UART link runs at 921 600 baud. Every packet has a `0xBEEF` header and a checksum:
@@ -174,6 +193,20 @@ The `edgetx_sdcard/` folder holds the ready-to-use **EdgeTX** SD card content fo
 - `SOUNDS/`, `SCREENSHOTS/`, `LOGS/`, `FIRMWARE/`, `BACKUP/` — standard EdgeTX directories
 
 **Usage:** copy the contents of `edgetx_sdcard/` onto the transmitter's SD card (matching the firmware version above), then select the Pneuracer model on the radio.
+---
+📚 References / Datasheets
+Datasheets of the main components used in the project:
+- **ESP32-S3 / ESP32-WROOM-32** — <https://documentation.espressif.com/esp32-wroom-32_datasheet_en.pdf> · <https://www.espressif.com/en/products/socs/esp32-s3>
+- **LDI1117 / LDL1117** LDO regulator — <https://www.tme.eu/Document/493515917c20095fb60cb61e6bcc216a/ldi1117u.pdf>
+- **AL5809** LED driver (Diodes) — <https://www.diodes.com/assets/Datasheets/AL5809.pdf>
+- **STEF12H60** eFuse (ST) — <https://www.st.com/resource/en/datasheet/stef12h60m.pdf>
+- **IAUCN04S7N019D** N-MOSFET (Infineon) — <https://www.infineon.com/assets/row/public/documents/10/49/infineon-iaucn04s7n019d-datasheet-en.pdf>
+- **LSM6DSO / LSM6DSOX** IMU (ST) — <https://www.st.com/resource/en/datasheet/lsm6dso.pdf>
+- **AS5600** magnetic encoder — <https://techfun.sk/produkt/magneticky-rotacny-enkoder-as5600/>
+- **WS2812B** addressable LED — <https://www.sdiplight.com/what-is-ws2812b-led-and-how-to-use-ws2812b-led/>
+- **LiPo batteries** (RC Factory) — <https://www.rc-factory.eu/lipo-baterie>
+
+Tools & background reading used during development are kept with the SOČ project documentation.
 ---
 👤 Authors
 SPŠ Poprad, Slovakia
