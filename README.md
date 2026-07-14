@@ -2,24 +2,51 @@
 
 ![Pneuracer 2.0](docs/img/pneuracer.jpg)
 
-> Student engineering project by team **FLUJD** — SPŠ techniky a dizajnu, Poprad, Slovak Republic  
-> A functional prototype of a vehicle powered by **compressed air** — no fuel, no electric motors.  
-> Team: Peter Rigo (team lead — electronics, firmware, control system), Matej Mikita, Tomáš Frankovský, Tobias Cehula  
+> Student engineering project by team **FLUJD** — SPŠ techniky a dizajnu, Poprad, Slovak Republic
+> A functional prototype of a vehicle powered by **compressed air** — no fuel, no electric motors.
+> Team: Peter Rigo (team lead — electronics, firmware, control system), Matej Mikita, Tomáš Frankovský, Tobias Cehula
 > 📧 rigopeter11@gmail.com · 📷 Instagram [@flujdsk](https://instagram.com/flujdsk)
+
 ---
+
 📋 About the project
 Pneuracer 2.0 is the control-system firmware for a pneumatically powered model race car. Every part, circuit and line of the control program was designed and built by the team. The system uses a dual-microcontroller architecture of two ESP32-S3 chips that communicate over UART and together control the drivetrain, steering, tilt detection and vehicle diagnostics.
 The project is built on PlatformIO and compiles two independent firmware images from a single repository. It was developed for — and competed in — several engineering competitions (ENERSOL SK, SOČ, Strojár Inovátor, the international Pneuracer competition), not a single event.
----
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
 🏆 Achievements (2025/2026 school year)
+
 - 🥇 **Absolute winners** of the regional round of **ENERSOL SK** — best project of the whole round
 - 🥈 **2nd place** at the national round of **ENERSOL SK** — advanced to the international final
 - 🌍 Awarded at the **international ENERSOL** round in Senica (competing against V4 countries + Austria)
 - 🥈 **2nd place** at **Strojár Inovátor**, Technical University of Košice
 - 4️⃣ **4th place** at the national round of **SOČ**
 - 4️⃣ **4th place** out of 40 teams at the **international Pneuracer competition in Brno** — six places better than the previous year
+
 ---
+
+🤝 Sponsors & partners
+Pneuracer 2.0 was built with the generous support of our sponsors and partners:
+
+<p align="center">
+  <a href="https://easyeda.com"><img src="docs/img/sponsors/easyeda.png" alt="EasyEDA" height="66"></a>
+  <a href="https://jlcpcb.com"><img src="docs/img/sponsors/jlcpcb.png" alt="JLCPCB" height="66"></a>
+  <a href="https://www.datasoftware.sk"><img src="docs/img/sponsors/datasoftware.png" alt="DataSoftware s.r.o. Poprad" height="66"></a>
+  <a href="https://techfun.cz"><img src="docs/img/sponsors/techfun.png" alt="Techfun.cz" height="66"></a>
+  <a href="https://www.chemosvit.sk"><img src="docs/img/sponsors/chemosvit.png" alt="Chemosvit" height="66"></a>
+</p>
+
+- **[EasyEDA](https://easyeda.com)** — the EDA tool used to design all schematics and PCBs (see [`docs/hardware/`](docs/hardware/)).
+- **[JLCPCB](https://jlcpcb.com)** — manufacturing and assembly of the printed circuit boards.
+- **[DataSoftware s.r.o. Poprad](https://www.datasoftware.sk)** — supplied all the electronic components and parts.
+- **[Techfun.cz](https://techfun.cz)** — electronics know-how and expert review of the PCB design.
+- **[Chemosvit](https://www.chemosvit.sk)** — supported the team's travel to competitions and logistics.
+
+Huge thanks to all our sponsors for supporting student engineering! 🙏
+--------------------------------------------------------------------------------
+
 🏗️ System architecture
+
 ```
 [RC transmitter 2.4 GHz]
         │  ELRS/CRSF protocol
@@ -36,8 +63,11 @@ The project is built on PlatformIO and compiles two independent firmware images 
 │ • ADC: battery, current      │                                              │ • FreeRTOS TaskComms + Mutex    │
 └──────────────────────────────┘                                              └─────────────────────────────────┘
 ```
+
 ---
+
 📁 Repository structure
+
 ```
 pneuracer2.0/
 ├── platformio.ini              # Configuration — 2 build environments
@@ -71,7 +101,9 @@ pneuracer2.0/
 ├── TODO.md                     # Roadmap / known issues for the next PCB revision
 └── .pio/                       # PlatformIO build cache (do not commit)
 ```
+
 ---
+
 ⚙️ Hardware components
 Component	Side	Description
 ESP32-S3 (×2)	Master + Slave	`esp32-s3-devkitc-1`
@@ -91,9 +123,11 @@ Battery ADC	Master	Pin 15, 3S LiPo (9–12.6 V)
 Current ADC	Master	Pin 12
 
 A full **Bill of Materials** (control electronics + the SMC pneumatic kit) is in [`docs/BOM.md`](docs/BOM.md).
----
+--------------------------------------------------------------------------------------------------------------
+
 📐 Schematics
 The electrical schematics live in [`docs/schematics/`](docs/schematics/):
+
 - `schema.drawio` — main signal schematic (editable in [draw.io](https://app.diagrams.net))
 - `schema_power.drawio` + `schema_power.drawio.png` — power distribution (battery → eFuse → regulators)
 - `schema.dxf` / `schema.tif` — exported schematic for CAD / printing
@@ -101,9 +135,11 @@ The electrical schematics live in [`docs/schematics/`](docs/schematics/):
 The **EasyEDA Pro PCB projects** (main board + switching regulator) and their manufacturing files (Gerber, BOM, pick-and-place, interactive BOM) are in [`docs/hardware/`](docs/hardware/).
 
 ![Power schematic](docs/schematics/schema_power.drawio.png)
----
+-----------------------------------------------------------
+
 🔌 Master ↔ Slave communication protocol
 The UART link runs at 921 600 baud. Every packet has a `0xBEEF` header and a checksum:
+
 ```cpp
 // src/shared/SharedData.h
 const uint16_t PACKET_HEADER = 0xBEEF;
@@ -122,13 +158,16 @@ struct __attribute__((packed)) ControlPacket {
     uint8_t  checksum;       // checksum (summed XOR)
 };
 ```
+
 The slave processes packets in the FreeRTOS task `TaskComms` guarded by the `dataMutex` semaphore — the main loop never reads the data directly without locking.
----
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+
 🤖 Control modes (Slave)
 Manual mode
 The `throttle` value is mapped to the pause duration between valve switching. More throttle = shorter pause = higher output.
 Automatic mode — P controller
 The slave measures angular speed with the AS5600 encoder and compares it against the `AutomaticSpeed` setpoint. The controller corrects the valve delay:
+
 ```cpp
 float error      = automaticTargetSpeed - angular_speed;  // °/s
 float adjustment = AUTO_KP * error;                       // KP = 0.04
@@ -136,18 +175,21 @@ currentDelayTarget -= (long)constrain(adjustment,
                                       -AUTO_MAX_ADJUSTMENT,
                                        AUTO_MAX_ADJUSTMENT);
 ```
+
 Automatic gear shifting
 Condition	Action	Servo (µs)
 speed ≥ 1600 °/s	3rd gear	1200
 speed < 1400 °/s	1st gear	1800
 otherwise	Neutral	1450
 The hysteresis guard `GEAR_SHIFT_DELAY_MS = 250 ms` prevents rapid gear hunting.
----
+--------------------------------------------------------------------------------
+
 🛠️ Building and flashing the firmware
 Requirements
 Visual Studio Code + PlatformIO extension
 or PlatformIO CLI: `pip install platformio`
 Steps
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/PeterLinuxOSS/pneuracer2.0.git
@@ -162,20 +204,24 @@ pio run -e slave_esp --target upload
 # 4. Monitor (921600 baud)
 pio device monitor
 ```
-> **Ports:** Master looks for `hwgrep://Standard COM Port`, Slave `hwgrep://Enhanced COM Port`.  
+
+> **Ports:** Master looks for `hwgrep://Standard COM Port`, Slave `hwgrep://Enhanced COM Port`.
 > Change `upload_port` in `platformio.ini` to match your system if needed.
-Libraries (PlatformIO downloads them automatically)
-Library	Version	Where
-`Adafruit NeoPixel`	^1.15.2	Master + Slave
-`CRSFforArduino`	^2025.12.11	Master
-`Adafruit LSM6DS`	^4.7.4	Master + Slave
-`ESP32Servo`	^3.1.3	Master + Slave
-`AS5600` (robtillaart)	^0.6.7	Master + Slave
-`Arduino_LSM6DSOX`	^1.1.2	Slave
+> Libraries (PlatformIO downloads them automatically)
+> Library	Version	Where
+> `Adafruit NeoPixel`	^1.15.2	Master + Slave
+> `CRSFforArduino`	^2025.12.11	Master
+> `Adafruit LSM6DS`	^4.7.4	Master + Slave
+> `ESP32Servo`	^3.1.3	Master + Slave
+> `AS5600` (robtillaart)	^0.6.7	Master + Slave
+> `Arduino_LSM6DSOX`	^1.1.2	Slave
+
 ---
+
 🔧 Parameter tuning
 All tunable values live in `config.h` — no "magic numbers" in the code.
 `src/slave/config.h` — controller and valves:
+
 ```cpp
 #define AUTO_KP               0.04f   // proportional gain
 #define AUTO_MAX_ADJUSTMENT   15      // max delay change per cycle (ms)
@@ -184,21 +230,29 @@ All tunable values live in `config.h` — no "magic numbers" in the code.
 #define GEAR_DOWN_SPEED       1400.0f // shift down (°/s)
 #define CONNECTION_TIMEOUT_MS 500     // failsafe on communication loss (ms)
 ```
+
 `src/master/config.h` — battery and safety:
+
 ```cpp
 #define TILT_WARNING_THRESHOLD   30.0f  // warning angle (°)
 #define TILT_CRITICAL_THRESHOLD  45.0f  // critical angle (°)
 #define BATTERY_VOLTAGE_MIN      9.0f   // min 3S LiPo voltage (V)
 #define BATTERY_VOLTAGE_CRITICAL 9.0f   // triggers error state (V)
 ```
+
 ---
+
 🧩 3D model (`Model/`)
-The `Model/` folder contains the 3D CAD model of the car exported from **Onshape**: 
+The `Model/` folder contains the 3D CAD model of the car exported from **Onshape**:
+
 - `Assembly 1.step` — the full vehicle assembly in the neutral **STEP** format (ISO 10303), so it can be opened in any CAD package (Fusion 360, SolidWorks, FreeCAD, Onshape, …) for further editing, fitment checks or manufacturing.
--  <https://cad.onshape.com/documents/b738f9fed58a0fc4300e86a8/w/2e6fb48d5bbfbd61ad92da93/e/82aa846a4fa390a4291205c2?renderMode=0&uiState=6a414e6d9a392f71b3d31cf3>
+- [https://cad.onshape.com/documents/b738f9fed58a0fc4300e86a8/w/2e6fb48d5bbfbd61ad92da93/e/82aa846a4fa390a4291205c2?renderMode=0&uiState=6a414e6d9a392f71b3d31cf3](https://cad.onshape.com/documents/b738f9fed58a0fc4300e86a8/w/2e6fb48d5bbfbd61ad92da93/e/82aa846a4fa390a4291205c2?renderMode=0&uiState=6a414e6d9a392f71b3d31cf3)
+
 ---
+
 🎮 Transmitter — EdgeTX SD card (`edgetx_sdcard/`)
 The `edgetx_sdcard/` folder holds the ready-to-use **EdgeTX** SD card content for the RadioMaster transmitter that controls the car over ELRS/CRSF.
+
 - Firmware target: **`pocket`** · EdgeTX **v2.11.4** (see `edgetx.sdcard.target` / `edgetx.sdcard.version`)
 - `MODELS/` — transmitter model configs (`model00.yml` … `model04.yml`), including the Pneuracer model
 - `RADIO/` — global radio settings (`radio.yml`)
@@ -206,29 +260,34 @@ The `edgetx_sdcard/` folder holds the ready-to-use **EdgeTX** SD card content fo
 - `SOUNDS/`, `SCREENSHOTS/`, `LOGS/`, `FIRMWARE/`, `BACKUP/` — standard EdgeTX directories
 
 **Usage:** copy the contents of `edgetx_sdcard/` onto the transmitter's SD card (matching the firmware version above), then select the Pneuracer model on the radio.
----
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
 📚 References / Datasheets
 Datasheets of the main components used in the project:
-- **ESP32-S3 / ESP32-WROOM-32** — <https://documentation.espressif.com/esp32-wroom-32_datasheet_en.pdf> · <https://www.espressif.com/en/products/socs/esp32-s3>
-- **LDI1117 / LDL1117** LDO regulator — <https://www.tme.eu/Document/493515917c20095fb60cb61e6bcc216a/ldi1117u.pdf>
-- **AL5809** LED driver (Diodes) — <https://www.diodes.com/assets/Datasheets/AL5809.pdf>
-- **STEF12H60** eFuse (ST) — <https://www.st.com/resource/en/datasheet/stef12h60m.pdf>
-- **IAUCN04S7N019D** N-MOSFET (Infineon) — <https://www.infineon.com/assets/row/public/documents/10/49/infineon-iaucn04s7n019d-datasheet-en.pdf>
-- **LSM6DSO / LSM6DSOX** IMU (ST) — <https://www.st.com/resource/en/datasheet/lsm6dso.pdf>
-- **AS5600** magnetic encoder — <https://techfun.sk/produkt/magneticky-rotacny-enkoder-as5600/>
-- **WS2812B** addressable LED — <https://www.sdiplight.com/what-is-ws2812b-led-and-how-to-use-ws2812b-led/>
-- **LiPo batteries** (RC Factory) — <https://www.rc-factory.eu/lipo-baterie>
+
+- **ESP32-S3 / ESP32-WROOM-32** — [https://documentation.espressif.com/esp32-wroom-32_datasheet_en.pdf](https://documentation.espressif.com/esp32-wroom-32_datasheet_en.pdf) · [https://www.espressif.com/en/products/socs/esp32-s3](https://www.espressif.com/en/products/socs/esp32-s3)
+- **LDI1117 / LDL1117** LDO regulator — [https://www.tme.eu/Document/493515917c20095fb60cb61e6bcc216a/ldi1117u.pdf](https://www.tme.eu/Document/493515917c20095fb60cb61e6bcc216a/ldi1117u.pdf)
+- **AL5809** LED driver (Diodes) — [https://www.diodes.com/assets/Datasheets/AL5809.pdf](https://www.diodes.com/assets/Datasheets/AL5809.pdf)
+- **STEF12H60** eFuse (ST) — [https://www.st.com/resource/en/datasheet/stef12h60m.pdf](https://www.st.com/resource/en/datasheet/stef12h60m.pdf)
+- **IAUCN04S7N019D** N-MOSFET (Infineon) — [https://www.infineon.com/assets/row/public/documents/10/49/infineon-iaucn04s7n019d-datasheet-en.pdf](https://www.infineon.com/assets/row/public/documents/10/49/infineon-iaucn04s7n019d-datasheet-en.pdf)
+- **LSM6DSO / LSM6DSOX** IMU (ST) — [https://www.st.com/resource/en/datasheet/lsm6dso.pdf](https://www.st.com/resource/en/datasheet/lsm6dso.pdf)
+- **AS5600** magnetic encoder — [https://techfun.sk/produkt/magneticky-rotacny-enkoder-as5600/](https://techfun.sk/produkt/magneticky-rotacny-enkoder-as5600/)
+- **WS2812B** addressable LED — [https://www.sdiplight.com/what-is-ws2812b-led-and-how-to-use-ws2812b-led/](https://www.sdiplight.com/what-is-ws2812b-led-and-how-to-use-ws2812b-led/)
+- **LiPo batteries** (RC Factory) — [https://www.rc-factory.eu/lipo-baterie](https://www.rc-factory.eu/lipo-baterie)
 
 Tools & background reading used during development are kept with the project documentation.
----
+-------------------------------------------------------------------------------------------
+
 👤 Authors
 Team **FLUJD** — SPŠ techniky a dizajnu, Poprad, Slovakia
+
 - **Peter Rigo** — team lead, electronics, firmware, control system · 📧 rigopeter11@gmail.com
 - **Matej Mikita**
 - **Tomáš Frankovský**
 - **Tobias Cehula**
 
 📷 Instagram [@flujdsk](https://instagram.com/flujdsk)
----
+------------------------------------------------------
+
 📄 License
 This project was created by team FLUJD for several student engineering competitions (ENERSOL SK, SOČ, Strojár Inovátor, Pneuracer). The code is shared for educational use.
