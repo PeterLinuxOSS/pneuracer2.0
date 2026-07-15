@@ -34,6 +34,7 @@ pio device monitor                      # 921600 baud
 - 📦 **[Bill of materials](docs/BOM.md)** — electronics + pneumatic kit
 - 🔩 **[Hardware / PCB](docs/hardware/)** · 📐 **[Schematics](docs/schematics/)**
 - 🗺️ **[Roadmap / TODO](TODO.md)** — planned improvements for the next PCB revision
+- 📸 **[Gallery](docs/GALLERY.md)** — photos of the car and the team
 
 ## 🤝 Sponsors & partners
 
@@ -56,4 +57,9 @@ Team **FLUJD** — SPŠ techniky a dizajnu, Poprad 🇸🇰
 
 ## 📄 License
 
-Created by team FLUJD for student engineering competitions (ENERSOL SK, SOČ, Strojár Inovátor, Pneuracer). Shared for educational use.
+© 2026 Team FLUJD (Peter Rigo, Matej Mikita, Tomáš Frankovský, Tobias Cehula). Open source under copyleft:
+
+- **Firmware & source code** — [GNU GPL v3.0](LICENSE). Derivatives must stay open-source under the same license.
+- **Hardware, schematics, PCB files, CAD & documentation** — [CC BY-SA 4.0](LICENSE-HARDWARE.txt). Share alike, with attribution.
+
+You are free to use, study, modify and share the project — just keep it open and credit **Team FLUJD**.
