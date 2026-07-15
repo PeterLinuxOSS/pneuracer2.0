@@ -14,7 +14,8 @@ Two **ESP32-S3** chips (master + slave) talk over UART and together run the driv
 - 🥇 **Regional winners** — ENERSOL SK (best project of the round)
 - 🥈 **2nd place** — ENERSOL SK national → international final (Senica, V4 + Austria)
 - 🥈 **2nd place** — Strojár Inovátor, TU Košice
-- 4️⃣ **4th** — SOČ national · **4th / 40** — international Pneuracer, Brno *(+6 vs. last year)*
+- 4️⃣ **4th** — SOČ national
+- 4️⃣ **4th / 40** — international Pneuracer, Brno *(+6 vs. last year)*
 
 ## 🚀 Quick start
 
